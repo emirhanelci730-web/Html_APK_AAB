@@ -15,35 +15,42 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      APP_NAME: ${{ github.event.inputs.app_name }}
+      PACKAGE_NAME: ${{ github.event.inputs.package_name }}
     steps:
-      - name: Depoyu Kopyala
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - name: Node.js ve Java Kurulumu
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '22'
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
 
-      - name: Proje Kurulumu ve Android Platformu
+      - name: Web dosyalarini www klasorune al
+        run: |
+          mkdir -p /tmp/www
+          rsync -a --exclude='.git' --exclude='.github' --exclude='node_modules' --exclude='android' --exclude='www' --exclude='package*.json' ./ /tmp/www/
+          mv /tmp/www ./www
+
+      - name: Capacitor projesini hazirla
         run: |
           npm init -y
           npm install @capacitor/core @capacitor/cli @capacitor/android
-          npx cap init "${{ github.event.inputs.app_name }}" "${{ github.event.inputs.package_name }}" --web-dir www --npm-client npm
+          npx cap init "$APP_NAME" "$PACKAGE_NAME" --web-dir www
           npx cap add android
+          npx cap sync android
 
-      - name: Gradle Derlemesi
+      - name: Gradle ile AAB derle
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleRelease
+          ./gradlew bundleRelease
 
-      - name: AAB Dosyasini Kaydet
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: play-store-release-aab
-          path: android/app/build/outputs/bundle/release/app-release.aab
+          path: android/app/build/outputs/bundle/release/*.aab

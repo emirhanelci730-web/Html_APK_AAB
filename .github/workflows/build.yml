@@ -1,0 +1,48 @@
+name: Build Android App (.AAB)
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: 'Uygulama Adi'
+        required: true
+        default: 'Benim Uygulamam'
+      package_name:
+        description: 'Paket Adi (örn: com.ornek.oyun)'
+        required: true
+        default: 'com.ornek.uygulama'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Depoyu Kopyala
+        uses: actions/checkout@v4
+
+      - name: Node.js Ortamini Kur
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Java (JDK 17) Kur
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Capacitor Projesini Hazirla
+        run: |
+          npm install
+          npx cap init "${{ github.event.inputs.app_name }}" "${{ github.event.inputs.package_name }}" --web-dir www
+          npx cap add android
+
+      - name: Gradle ile Play Store Uyumlu AAB Derle
+        run: |
+          cd android
+          ./gradlew bundleRelease
+
+      - name: Olusan AAB Dosyasini Kaydet (Artifacts)
+        uses: actions/upload-artifact@v4
+        with:
+          name: play-store-release-aab
+          path: android/app/build/outputs/bundle/release/app-release.aab

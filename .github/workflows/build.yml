@@ -19,32 +19,32 @@ jobs:
       - name: Depoyu Kopyala
         uses: actions/checkout@v4
 
-      - name: Java Kurulumu
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
       - name: Node.js Kurulumu
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Proje ve Capacitor Paketlerini Kur
+      - name: Java (JDK 17) Kurulumu
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Capacitor ve Paketleri Kur
         run: |
           npm init -y
           npm install @capacitor/core @capacitor/cli @capacitor/android
           npx cap init "${{ github.event.inputs.app_name }}" "${{ github.event.inputs.package_name }}" --web-dir www --npm-client npm
-
-      - name: Android Platformunu Eklee
-        run: |
           npx cap add android
 
-      - name: Gradle ile AAB Derle
+      - name: Android Lisanslarini Onayla ve Gradle ile AAB Derle
         run: |
+          yes | sdkmanager --licenses || true
           cd android
           chmod +x gradlew
           ./gradlew bundleRelease
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
 
       - name: Olusan AAB Dosyasini Kaydet
         uses: actions/upload-artifact@v4

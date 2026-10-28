@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HTML to APK/AAB Builder - Prototip</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: #334155;
+            --success: #22c55e;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 25px;
+        }
+
+        header h1 {
+            font-size: 1.5rem;
+            color: var(--primary);
+            margin-bottom: 5px;
+        }
+
+        header p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .card h2 {
+            font-size: 1.1rem;
+            margin-bottom: 15px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 8px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 5px;
+        }
+
+        input[type="text"], input[type="file"] {
+            width: 100%;
+            padding: 10px 12px;
+            background-color: var(--bg-color);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-main);
+            font-size: 0.95rem;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .file-drop-area {
+            border: 2px dashed var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+
+        .file-drop-area:hover {
+            border-color: var(--primary);
+        }
+
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            text-align: center;
+        }
+
+        .btn:hover {
+            background-color: var(--primary-hover);
+        }
+
+        .log-box {
+            background-color: #020617;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px;
+            font-family: monospace;
+            font-size: 0.8rem;
+            color: var(--success);
+            height: 120px;
+            overflow-y: auto;
+            display: none;
+            margin-top: 15px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <header>
+            <h1>APK & AAB Builder</h1>
+            <p>HTML5 Projelerini Android Paketlerine Dönüştürün</p>
+        </header>
+
+        <!-- Uygulama Bilgileri -->
+        <div class="card">
+            <h2>1. Uygulama Kimliği</h2>
+            <div class="form-group">
+                <label>Uygulama Adı</label>
+                <input type="text" id="appName" placeholder="Örn: Zümrüt Macera">
+            </div>
+            <div class="form-group">
+                <label>Paket Adı (Package Name)</label>
+                <input type="text" id="packageName" placeholder="Örn: com.kullanici.zumrutoyun">
+            </div>
+            <div class="form-group">
+                <label>Uygulama İkonu (PNG)</label>
+                <input type="file" id="appIcon" accept="image/png">
+            </div>
+        </div>
+
+        <!-- Proje Dosyaları -->
+        <div class="card">
+            <h2>2. Proje Dosyaları (HTML/JS)</h2>
+            <div class="form-group">
+                <label>Proje Klasörü / ZIP Arşivi</label>
+                <div class="file-drop-area" onclick="document.getElementById('projectFiles').click()">
+                    <span id="fileLabel">index.html ve kaynak dosyalarını içeren ZIP seçin</span>
+                    <input type="file" id="projectFiles" accept=".zip" style="display: none;" onchange="handleFileSelect(this)">
+                </div>
+            </div>
+        </div>
+
+        <!-- İşlem Butonu -->
+        <button class="btn" onclick="startPackaging()">APK / AAB Paketini Hazırla</button>
+
+        <!-- Durum Günlükleri -->
+        <div id="logBox" class="log-box"></div>
+    </div>
+
+    <script>
+        function handleFileSelect(input) {
+            const label = document.getElementById('fileLabel');
+            if (input.files && input.files.length > 0) {
+                label.textContent = "Seçilen Dosya: " + input.files[0].name;
+            }
+        }
+
+        function startPackaging() {
+            const appName = document.getElementById('appName').value.trim();
+            const packageName = document.getElementById('packageName').value.trim();
+            const projectFile = document.getElementById('projectFiles').files[0];
+            const logBox = document.getElementById('logBox');
+
+            if (!appName || !packageName || !projectFile) {
+                alert("Lütfen tüm alanları doldurun ve proje ZIP dosyasını seçin!");
+                return;
+            }
+
+            logBox.style.display = 'block';
+            logBox.innerHTML = "> Yapılandırma dosyaları doğrulanıyor...<br>";
+
+            setTimeout(() => {
+                logBox.innerHTML += `> Uygulama Adı (${appName}) ve Paket Adı (${packageName}) işlendi.<br>`;
+            }, 800);
+
+            setTimeout(() => {
+                logBox.innerHTML += `> ${projectFile.name} arşivi açılıyor ve WebView iskeletine entegre ediliyor...<br>`;
+            }, 1800);
+
+            setTimeout(() => {
+                logBox.innerHTML += `> Gradle derleme kuyruğuna gönderildi...<br>`;
+            }, 2800);
+
+            setTimeout(() => {
+                logBox.innerHTML += `<span style="color: #38bdf8;">> Başarılı! APK / AAB çıktısı hazırlandı (Simülasyon).</span>`;
+            }, 4000);
+        }
+    </script>
+</body>
+</html>

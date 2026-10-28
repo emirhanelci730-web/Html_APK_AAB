@@ -34,7 +34,13 @@ jobs:
         run: |
           mkdir -p /tmp/www
           rsync -a --exclude='.git' --exclude='.github' --exclude='node_modules' --exclude='android' --exclude='www' --exclude='package*.json' ./ /tmp/www/
+          if [ ! -f /tmp/www/index.html ]; then
+            first=$(find /tmp/www -maxdepth 1 -iname '*.html' | head -n 1)
+            if [ -z "$first" ]; then echo "HATA: Repoda hic .html dosyasi yok"; exit 1; fi
+            cp "$first" /tmp/www/index.html
+          fi
           mv /tmp/www ./www
+          ls www
 
       - name: Capacitor projesini hazirla
         run: |
@@ -50,7 +56,23 @@ jobs:
           chmod +x gradlew
           ./gradlew bundleRelease
 
+      - name: AAB dosyasini imzala
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+          AAB=$(find android/app/build/outputs/bundle/release -name '*.aab' | head -n 1)
+          jarsigner -keystore "$RUNNER_TEMP/upload.jks" \
+            -storepass "$KS_PASS" \
+            -sigalg SHA256withRSA -digestalg SHA-256 \
+            "$AAB" "$KEY_ALIAS"
+          jarsigner -verify "$AAB"
+          cp "$AAB" signed-release.aab
+          rm -f "$RUNNER_TEMP/upload.jks"
+
       - uses: actions/upload-artifact@v4
         with:
-          name: play-store-release-aab
-          path: android/app/build/outputs/bundle/release/*.aab
+          name: play-store-signed-aab
+          path: signed-release.aab

@@ -22,7 +22,7 @@ jobs:
       - name: Node.js Ortamini Kur
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
 
       - name: Java (JDK 17) Kur
         uses: actions/setup-java@v4
@@ -30,15 +30,17 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Capacitor Projesini Hazirla
+      - name: Capacitor ve Proje Bagimliliklarini Kur
         run: |
-          npm install
+          npm init -y
+          npm install @capacitor/core @capacitor/cli @capacitor/android
           npx cap init "${{ github.event.inputs.app_name }}" "${{ github.event.inputs.package_name }}" --web-dir www
           npx cap add android
 
       - name: Gradle ile Play Store Uyumlu AAB Derle
         run: |
           cd android
+          chmod +x gradlew
           ./gradlew bundleRelease
 
       - name: Olusan AAB Dosyasini Kaydet (Artifacts)

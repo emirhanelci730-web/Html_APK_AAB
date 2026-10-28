@@ -19,19 +19,11 @@ jobs:
       - name: Depoyu Kopyala
         uses: actions/checkout@v4
 
-      - name: Node.js Ortamini Kur
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Java (JDK 17) Kur
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Capacitor ve Proje Bagimliliklarini Kur
+      - name: Ortami Hazirla ve Capacitor Kur
         run: |
+          sudo apt-get update
+          sudo apt-get install -y openjdk-17-jdk
+          node -v
           npm init -y
           npm install @capacitor/core @capacitor/cli @capacitor/android
           npx cap init "${{ github.event.inputs.app_name }}" "${{ github.event.inputs.package_name }}" --web-dir www

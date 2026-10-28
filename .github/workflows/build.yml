@@ -6,11 +6,12 @@ on:
       app_name:
         description: 'Uygulama Adi'
         required: true
-        default: 'Benim Uygulamam'
       package_name:
-        description: 'Paket Adi (örn: com.ornek.oyun)'
+        description: 'Paket Adi'
         required: true
-        default: 'com.ornek.uygulama'
+      job_id:
+        description: 'Is kimligi (Worker verir)'
+        required: true
 
 jobs:
   build:
@@ -18,9 +19,10 @@ jobs:
     env:
       APP_NAME: ${{ github.event.inputs.app_name }}
       PACKAGE_NAME: ${{ github.event.inputs.package_name }}
+      JOB_ID: ${{ github.event.inputs.job_id }}
+      WORKER_URL: ${{ secrets.WORKER_URL }}
+      WORKER_SECRET: ${{ secrets.WORKER_SECRET }}
     steps:
-      - uses: actions/checkout@v5
-
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
@@ -30,16 +32,24 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Web dosyalarini www klasorune al
+      - name: Kullanicinin ZIP dosyasini al
         run: |
-          mkdir -p /tmp/www
-          rsync -a --exclude='.git' --exclude='.github' --exclude='node_modules' --exclude='android' --exclude='www' --exclude='package*.json' ./ /tmp/www/
-          if [ ! -f /tmp/www/index.html ]; then
-            first=$(find /tmp/www -maxdepth 1 -iname '*.html' | head -n 1)
-            if [ -z "$first" ]; then echo "HATA: Repoda hic .html dosyasi yok"; exit 1; fi
-            cp "$first" /tmp/www/index.html
+          echo "$JOB_ID" | grep -Eq '^[0-9a-f-]{36}$' || { echo "Gecersiz is kimligi"; exit 1; }
+          curl -sSf -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/zip/$JOB_ID" -o project.zip
+          mkdir www
+          unzip -q project.zip -d www
+          rm -rf www/__MACOSX
+          if [ ! -f www/index.html ]; then
+            found=$(find www -name index.html | head -n 1)
+            if [ -n "$found" ]; then
+              dir=$(dirname "$found")
+              mv "$dir" ./www_new && rm -rf www && mv www_new www
+            else
+              first=$(find www -iname '*.html' | head -n 1)
+              [ -z "$first" ] && { echo "HATA: ZIP icinde .html yok"; exit 1; }
+              cp "$first" www/index.html
+            fi
           fi
-          mv /tmp/www ./www
           ls www
 
       - name: Capacitor projesini hazirla
@@ -72,7 +82,12 @@ jobs:
           cp "$AAB" signed-release.aab
           rm -f "$RUNNER_TEMP/upload.jks"
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: play-store-signed-aab
-          path: signed-release.aab
+      - name: AAB dosyasini Worker'a gonder
+        run: |
+          curl -sSf -X PUT -H "X-Secret: $WORKER_SECRET" \
+            --data-binary @signed-release.aab "$WORKER_URL/result/$JOB_ID"
+
+      - name: Hata bildir
+        if: failure()
+        run: |
+          curl -s -X POST -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/fail/$JOB_ID" || true

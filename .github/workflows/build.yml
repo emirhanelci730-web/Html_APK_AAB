@@ -19,23 +19,34 @@ jobs:
       - name: Depoyu Kopyala
         uses: actions/checkout@v4
 
-      - name: Ortami Hazirla ve Capacitor Kur
+      - name: Java Kurulumu
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Node.js Kurulumu
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Proje ve Capacitor Paketlerini Kur
         run: |
-          sudo apt-get update
-          sudo apt-get install -y openjdk-17-jdk
-          node -v
           npm init -y
           npm install @capacitor/core @capacitor/cli @capacitor/android
-          npx cap init "${{ github.event.inputs.app_name }}" "${{ github.event.inputs.package_name }}" --web-dir www
+          npx cap init "${{ github.event.inputs.app_name }}" "${{ github.event.inputs.package_name }}" --web-dir www --npm-client npm
+
+      - name: Android Platformunu Eklee
+        run: |
           npx cap add android
 
-      - name: Gradle ile Play Store Uyumlu AAB Derle
+      - name: Gradle ile AAB Derle
         run: |
           cd android
           chmod +x gradlew
           ./gradlew bundleRelease
 
-      - name: Olusan AAB Dosyasini Kaydet (Artifacts)
+      - name: Olusan AAB Dosyasini Kaydet
         uses: actions/upload-artifact@v4
         with:
           name: play-store-release-aab

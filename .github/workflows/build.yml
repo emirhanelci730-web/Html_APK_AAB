@@ -36,9 +36,15 @@ jobs:
         run: |
           echo "$JOB_ID" | grep -Eq '^[0-9a-f-]{36}$' || { echo "Gecersiz is kimligi"; exit 1; }
           curl -sSf -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/zip/$JOB_ID" -o project.zip
-          mkdir www
-          unzip -q project.zip -d www
-          rm -rf www/__MACOSX
+                    mkdir www
+          if unzip -tq project.zip >/dev/null 2>&1; then
+            unzip -q project.zip -d www
+            rm -rf www/__MACOSX
+          else
+            cp project.zip www/index.html
+          fi
+          
+  
           if [ ! -f www/index.html ]; then
             found=$(find www -name index.html | head -n 1)
             if [ -n "$found" ]; then

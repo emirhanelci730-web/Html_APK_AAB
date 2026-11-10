@@ -28,6 +28,10 @@ on:
         description: 'Ikon var mi (true, false)'
         required: true
         default: 'false'
+      sign_mode:
+        description: 'Imzalama (new, own)'
+        required: true
+        default: 'new'
 
 jobs:
   build:
@@ -36,6 +40,7 @@ jobs:
       APP_NAME: ${{ github.event.inputs.app_name }}
       PACKAGE_NAME: ${{ github.event.inputs.package_name }}
       JOB_ID: ${{ github.event.inputs.job_id }}
+      SIGN_MODE: ${{ github.event.inputs.sign_mode }}
       WORKER_URL: ${{ secrets.WORKER_URL }}
       WORKER_SECRET: ${{ secrets.WORKER_SECRET }}
     steps:
@@ -49,6 +54,7 @@ jobs:
           java-version: '21'
 
       - name: Kullanicinin dosyasini al
+        id: getfile
         run: |
           echo "$JOB_ID" | grep -Eq '^[0-9a-f-]{36}$' || { echo "Gecersiz is kimligi"; exit 1; }
           curl -sSf -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/zip/$JOB_ID" -o project.zip
@@ -71,6 +77,7 @@ jobs:
           ls www
 
       - name: Capacitor projesini hazirla
+        id: cap
         run: |
           npm init -y
           npm install @capacitor/core @capacitor/cli @capacitor/android
@@ -79,6 +86,7 @@ jobs:
           npx cap sync android
 
       - name: Surum, yon ve ikon ayarla
+        id: settings
         env:
           VNAME: ${{ github.event.inputs.version_name }}
           VCODE: ${{ github.event.inputs.version_code }}
@@ -113,37 +121,75 @@ jobs:
             echo "Ikon degistirildi"
           fi
 
+      - name: Imzalama anahtarini hazirla
+        id: keys
+        run: |
+          KS="$RUNNER_TEMP/upload.jks"
+          if [ "$SIGN_MODE" = "own" ]; then
+            curl -sSf -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/sign/$JOB_ID" -o "$RUNNER_TEMP/sign.json"
+            curl -sSf -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/ukeystore/$JOB_ID" -o "$KS"
+            ALIAS=$(jq -r .alias "$RUNNER_TEMP/sign.json")
+            SPASS=$(jq -r .storePass "$RUNNER_TEMP/sign.json")
+            KPASS=$(jq -r .keyPass "$RUNNER_TEMP/sign.json")
+            rm -f "$RUNNER_TEMP/sign.json"
+            echo "::add-mask::$SPASS"
+            echo "::add-mask::$KPASS"
+            keytool -list -keystore "$KS" -storepass "$SPASS" -alias "$ALIAS" >/dev/null 2>&1 \
+              || { echo "HATA: anahtar dosyasi, sifre veya takma ad yanlis"; exit 1; }
+          else
+            SPASS=$(openssl rand -hex 16)
+            KPASS="$SPASS"
+            ALIAS="upload"
+            echo "::add-mask::$SPASS"
+            keytool -genkeypair -storetype PKCS12 -keystore "$KS" \
+              -alias "$ALIAS" -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$SPASS" -keypass "$SPASS" -dname "CN=Android, C=TR" >/dev/null 2>&1
+            printf 'Uygulama: %s\nPaket adi: %s\nTakma ad (alias): %s\nSifre: %s\n' \
+              "$APP_NAME" "$PACKAGE_NAME" "$ALIAS" "$SPASS" > keyinfo.txt
+          fi
+          echo "ALIAS=$ALIAS" >> "$GITHUB_ENV"
+          echo "KS_PASS=$SPASS" >> "$GITHUB_ENV"
+          echo "KEY_PASS=$KPASS" >> "$GITHUB_ENV"
+
       - name: Gradle ile AAB ve APK derle
+        id: gradle
         run: |
           cd android
           chmod +x gradlew
           ./gradlew bundleRelease assembleRelease
 
       - name: AAB ve APK dosyalarini imzala
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        id: sign
         run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+          KS="$RUNNER_TEMP/upload.jks"
+          JKP=""
+          AKP=""
+          if [ "$KEY_PASS" != "$KS_PASS" ]; then
+            JKP="-keypass:env KEY_PASS"
+            AKP="--key-pass env:KEY_PASS"
+          fi
           AAB=$(find android/app/build/outputs/bundle/release -name '*.aab' | head -n 1)
-          jarsigner -keystore "$RUNNER_TEMP/upload.jks" \
-            -storepass "$KS_PASS" \
+          jarsigner -keystore "$KS" -storepass:env KS_PASS $JKP \
             -sigalg SHA256withRSA -digestalg SHA-256 \
-            "$AAB" "$KEY_ALIAS"
+            "$AAB" "$ALIAS"
           jarsigner -verify "$AAB"
           cp "$AAB" signed-release.aab
           APK=$(find android/app/build/outputs/apk/release -name '*.apk' | head -n 1)
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
           "$BT/zipalign" -p -f 4 "$APK" aligned.apk
-          "$BT/apksigner" sign --ks "$RUNNER_TEMP/upload.jks" \
-            --ks-key-alias "$KEY_ALIAS" --ks-pass env:KS_PASS \
+          "$BT/apksigner" sign --ks "$KS" \
+            --ks-key-alias "$ALIAS" --ks-pass env:KS_PASS $AKP \
             --out signed-release.apk aligned.apk
           "$BT/apksigner" verify signed-release.apk
-          rm -f "$RUNNER_TEMP/upload.jks"
 
       - name: Dosyalari Worker'a gonder
         run: |
+          if [ "$SIGN_MODE" = "new" ]; then
+            curl -sSf -X PUT -H "X-Secret: $WORKER_SECRET" \
+              --data-binary @"$RUNNER_TEMP/upload.jks" "$WORKER_URL/result/$JOB_ID?type=keystore"
+            curl -sSf -X PUT -H "X-Secret: $WORKER_SECRET" \
+              --data-binary @keyinfo.txt "$WORKER_URL/result/$JOB_ID?type=keyinfo"
+          fi
           curl -sSf -X PUT -H "X-Secret: $WORKER_SECRET" \
             --data-binary @signed-release.apk "$WORKER_URL/result/$JOB_ID?type=apk"
           curl -sSf -X PUT -H "X-Secret: $WORKER_SECRET" \
@@ -151,5 +197,19 @@ jobs:
 
       - name: Hata bildir
         if: failure()
+        env:
+          S_GET: ${{ steps.getfile.outcome }}
+          S_CAP: ${{ steps.cap.outcome }}
+          S_SET: ${{ steps.settings.outcome }}
+          S_KEYS: ${{ steps.keys.outcome }}
+          S_GRADLE: ${{ steps.gradle.outcome }}
+          S_SIGN: ${{ steps.sign.outcome }}
         run: |
-          curl -s -X POST -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/fail/$JOB_ID" || true
+          MSG="Derleme beklenmedik bir sebeple basarisiz oldu."
+          [ "$S_GET" = "failure" ] && MSG="Dosya acilamadi. ZIP bozuk olabilir ya da icinde index.html yok."
+          [ "$S_CAP" = "failure" ] && MSG="Uygulama olusturulamadi. Uygulama adi veya paket adi gecersiz olabilir."
+          [ "$S_SET" = "failure" ] && MSG="Surum, yon veya ikon ayarlanamadi. Ikon gecerli bir PNG olmayabilir."
+          [ "$S_KEYS" = "failure" ] && MSG="Imzalama anahtari acilamadi. Anahtar dosyasi, sifre veya takma ad yanlis olabilir."
+          [ "$S_GRADLE" = "failure" ] && MSG="Android derlemesi basarisiz oldu."
+          [ "$S_SIGN" = "failure" ] && MSG="Imzalama basarisiz oldu."
+          curl -s -X POST -H "X-Secret: $WORKER_SECRET" --data "$MSG" "$WORKER_URL/fail/$JOB_ID" || true

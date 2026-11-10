@@ -32,7 +32,7 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Kullanicinin ZIP dosyasini al
+      - name: Kullanicinin dosyasini al
         run: |
           echo "$JOB_ID" | grep -Eq '^[0-9a-f-]{36}$' || { echo "Gecersiz is kimligi"; exit 1; }
           curl -sSf -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/zip/$JOB_ID" -o project.zip
@@ -40,20 +40,17 @@ jobs:
           if unzip -tq project.zip >/dev/null 2>&1; then
             unzip -q project.zip -d www
             rm -rf www/__MACOSX
+            if [ ! -f www/index.html ]; then
+              found=$(find www -name index.html | head -n 1)
+              if [ -n "$found" ]; then
+                dir=$(dirname "$found")
+                mv "$dir" ./www_new && rm -rf www && mv www_new www
+              else
+                echo "HATA: ZIP icinde index.html yok"; exit 1
+              fi
+            fi
           else
             cp project.zip www/index.html
-          fi
-          
-          if [ ! -f www/index.html ]; then
-            found=$(find www -name index.html | head -n 1)
-            if [ -n "$found" ]; then
-              dir=$(dirname "$found")
-              mv "$dir" ./www_new && rm -rf www && mv www_new www
-            else
-              first=$(find www -iname '*.html' | head -n 1)
-              [ -z "$first" ] && { echo "HATA: ZIP icinde .html yok"; exit 1; }
-              cp "$first" www/index.html
-            fi
           fi
           ls www
 
@@ -65,13 +62,13 @@ jobs:
           npx cap add android
           npx cap sync android
 
-      - name: Gradle ile AAB derle
+      - name: Gradle ile AAB ve APK derle
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew bundleRelease
+          ./gradlew bundleRelease assembleRelease
 
-      - name: AAB dosyasini imzala
+      - name: AAB ve APK dosyalarini imzala
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -85,18 +82,21 @@ jobs:
             "$AAB" "$KEY_ALIAS"
           jarsigner -verify "$AAB"
           cp "$AAB" signed-release.aab
+          APK=$(find android/app/build/outputs/apk/release -name '*.apk' | head -n 1)
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          "$BT/zipalign" -p -f 4 "$APK" aligned.apk
+          "$BT/apksigner" sign --ks "$RUNNER_TEMP/upload.jks" \
+            --ks-key-alias "$KEY_ALIAS" --ks-pass env:KS_PASS \
+            --out signed-release.apk aligned.apk
+          "$BT/apksigner" verify signed-release.apk
           rm -f "$RUNNER_TEMP/upload.jks"
 
-      - name: AAB dosyasini Artifact Olarak Kaydet
-        uses: actions/upload-artifact@v4
-        with:
-          name: signed-release-aab
-          path: signed-release.aab
-
-      - name: AAB dosyasini Worker'a gonder
+      - name: Dosyalari Worker'a gonder
         run: |
           curl -sSf -X PUT -H "X-Secret: $WORKER_SECRET" \
-            --data-binary @signed-release.aab "$WORKER_URL/result/$JOB_ID"
+            --data-binary @signed-release.apk "$WORKER_URL/result/$JOB_ID?type=apk"
+          curl -sSf -X PUT -H "X-Secret: $WORKER_SECRET" \
+            --data-binary @signed-release.aab "$WORKER_URL/result/$JOB_ID?type=aab"
 
       - name: Hata bildir
         if: failure()

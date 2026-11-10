@@ -36,7 +36,7 @@ jobs:
         run: |
           echo "$JOB_ID" | grep -Eq '^[0-9a-f-]{36}$' || { echo "Gecersiz is kimligi"; exit 1; }
           curl -sSf -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/zip/$JOB_ID" -o project.zip
-                    mkdir www
+          mkdir www
           if unzip -tq project.zip >/dev/null 2>&1; then
             unzip -q project.zip -d www
             rm -rf www/__MACOSX
@@ -44,7 +44,6 @@ jobs:
             cp project.zip www/index.html
           fi
           
-  
           if [ ! -f www/index.html ]; then
             found=$(find www -name index.html | head -n 1)
             if [ -n "$found" ]; then
@@ -87,6 +86,12 @@ jobs:
           jarsigner -verify "$AAB"
           cp "$AAB" signed-release.aab
           rm -f "$RUNNER_TEMP/upload.jks"
+
+      - name: AAB dosyasini Artifact Olarak Kaydet
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-release-aab
+          path: signed-release.aab
 
       - name: AAB dosyasini Worker'a gonder
         run: |

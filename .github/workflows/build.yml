@@ -12,6 +12,22 @@ on:
       job_id:
         description: 'Is kimligi (Worker verir)'
         required: true
+      version_name:
+        description: 'Surum adi'
+        required: true
+        default: '1.0.0'
+      version_code:
+        description: 'Surum numarasi'
+        required: true
+        default: '1'
+      orientation:
+        description: 'Ekran yonu (portrait, landscape, unspecified)'
+        required: true
+        default: 'unspecified'
+      has_icon:
+        description: 'Ikon var mi (true, false)'
+        required: true
+        default: 'false'
 
 jobs:
   build:
@@ -61,6 +77,41 @@ jobs:
           npx cap init "$APP_NAME" "$PACKAGE_NAME" --web-dir www
           npx cap add android
           npx cap sync android
+
+      - name: Surum, yon ve ikon ayarla
+        env:
+          VNAME: ${{ github.event.inputs.version_name }}
+          VCODE: ${{ github.event.inputs.version_code }}
+          ORI: ${{ github.event.inputs.orientation }}
+          HAS_ICON: ${{ github.event.inputs.has_icon }}
+        run: |
+          echo "$VNAME" | grep -Eq '^[0-9A-Za-z._-]{1,20}$' || { echo "Gecersiz surum adi"; exit 1; }
+          echo "$VCODE" | grep -Eq '^[0-9]{1,10}$' || { echo "Gecersiz surum numarasi"; exit 1; }
+          case "$ORI" in portrait|landscape|unspecified) ;; *) echo "Gecersiz yon"; exit 1;; esac
+
+          GRADLE=android/app/build.gradle
+          sed -i "s/versionCode [0-9]*/versionCode $VCODE/; s/versionName \"[^\"]*\"/versionName \"$VNAME\"/" "$GRADLE"
+          grep -n "versionCode\|versionName" "$GRADLE"
+          grep -q "versionCode $VCODE" "$GRADLE" || { echo "HATA: surum numarasi degismedi"; exit 1; }
+
+          if [ "$ORI" != "unspecified" ]; then
+            sed -i "0,/<activity/s//<activity android:screenOrientation=\"$ORI\"/" android/app/src/main/AndroidManifest.xml
+            grep -n "screenOrientation" android/app/src/main/AndroidManifest.xml
+          fi
+
+          if [ "$HAS_ICON" = "true" ]; then
+            sudo apt-get install -y imagemagick >/dev/null
+            curl -sSf -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/icon/$JOB_ID" -o icon.png
+            RES=android/app/src/main/res
+            rm -rf "$RES/mipmap-anydpi-v26"
+            for pair in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+              d=${pair%%:*}; s=${pair##*:}
+              for name in ic_launcher ic_launcher_round; do
+                convert icon.png -resize ${s}x${s}^ -gravity center -extent ${s}x${s} "$RES/mipmap-$d/$name.png"
+              done
+            done
+            echo "Ikon degistirildi"
+          fi
 
       - name: Gradle ile AAB ve APK derle
         run: |

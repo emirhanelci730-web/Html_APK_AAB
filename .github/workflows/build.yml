@@ -32,6 +32,10 @@ on:
         description: 'Imzalama (new, own)'
         required: true
         default: 'new'
+      splash_color:
+        description: 'Acilis ekrani rengi (#rrggbb)'
+        required: true
+        default: '#12161c'
 
 jobs:
   build:
@@ -92,6 +96,7 @@ jobs:
           VCODE: ${{ github.event.inputs.version_code }}
           ORI: ${{ github.event.inputs.orientation }}
           HAS_ICON: ${{ github.event.inputs.has_icon }}
+          SPLASH: ${{ github.event.inputs.splash_color }}
         run: |
           echo "$VNAME" | grep -Eq '^[0-9A-Za-z._-]{1,20}$' || { echo "Gecersiz surum adi"; exit 1; }
           echo "$VCODE" | grep -Eq '^[0-9]{1,10}$' || { echo "Gecersiz surum numarasi"; exit 1; }
@@ -106,6 +111,16 @@ jobs:
             sed -i "0,/<activity/s//<activity android:screenOrientation=\"$ORI\"/" android/app/src/main/AndroidManifest.xml
             grep -n "screenOrientation" android/app/src/main/AndroidManifest.xml
           fi
+
+          echo "$SPLASH" | grep -Eq '^#[0-9A-Fa-f]{6}$' || { echo "Gecersiz acilis rengi"; exit 1; }
+          SRES=android/app/src/main/res
+          find "$SRES" -name 'splash.png' -delete
+          mkdir -p "$SRES/drawable"
+          printf '<?xml version="1.0" encoding="utf-8"?>\n<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">\n    <solid android:color="%s"/>\n</shape>\n' "$SPLASH" > "$SRES/drawable/splash.xml"
+          if grep -q "Theme.SplashScreen" "$SRES/values/styles.xml" && ! grep -q "windowSplashScreenBackground" "$SRES/values/styles.xml"; then
+            sed -i "/AppTheme.NoActionBarLaunch/a <item name=\"windowSplashScreenBackground\">$SPLASH</item>" "$SRES/values/styles.xml"
+          fi
+          cat "$SRES/values/styles.xml"
 
           if [ "$HAS_ICON" = "true" ]; then
             sudo apt-get install -y imagemagick >/dev/null
@@ -208,7 +223,7 @@ jobs:
           MSG="Derleme beklenmedik bir sebeple basarisiz oldu."
           [ "$S_GET" = "failure" ] && MSG="Dosya acilamadi. ZIP bozuk olabilir ya da icinde index.html yok."
           [ "$S_CAP" = "failure" ] && MSG="Uygulama olusturulamadi. Uygulama adi veya paket adi gecersiz olabilir."
-          [ "$S_SET" = "failure" ] && MSG="Surum, yon veya ikon ayarlanamadi. Ikon gecerli bir PNG olmayabilir."
+          [ "$S_SET" = "failure" ] && MSG="Surum, yon, ikon veya acilis rengi ayarlanamadi. Ikon gecerli bir PNG olmayabilir."
           [ "$S_KEYS" = "failure" ] && MSG="Imzalama anahtari acilamadi. Anahtar dosyasi, sifre veya takma ad yanlis olabilir."
           [ "$S_GRADLE" = "failure" ] && MSG="Android derlemesi basarisiz oldu."
           [ "$S_SIGN" = "failure" ] && MSG="Imzalama basarisiz oldu."

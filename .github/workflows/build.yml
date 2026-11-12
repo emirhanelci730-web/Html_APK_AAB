@@ -60,6 +60,7 @@ jobs:
       - name: Kullanicinin dosyasini al
         id: getfile
         run: |
+          curl -s -m 10 -X POST -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/progress/$JOB_ID?stage=getfile" >/dev/null || true
           echo "$JOB_ID" | grep -Eq '^[0-9a-f-]{36}$' || { echo "Gecersiz is kimligi"; exit 1; }
           curl -sSf -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/zip/$JOB_ID" -o project.zip
           mkdir www
@@ -83,6 +84,7 @@ jobs:
       - name: Capacitor projesini hazirla
         id: cap
         run: |
+          curl -s -m 10 -X POST -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/progress/$JOB_ID?stage=cap" >/dev/null || true
           npm init -y
           npm install @capacitor/core @capacitor/cli @capacitor/android
           npx cap init "$APP_NAME" "$PACKAGE_NAME" --web-dir www
@@ -98,6 +100,7 @@ jobs:
           HAS_ICON: ${{ github.event.inputs.has_icon }}
           SPLASH: ${{ github.event.inputs.splash_color }}
         run: |
+          curl -s -m 10 -X POST -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/progress/$JOB_ID?stage=settings" >/dev/null || true
           echo "$VNAME" | grep -Eq '^[0-9A-Za-z._-]{1,20}$' || { echo "Gecersiz surum adi"; exit 1; }
           echo "$VCODE" | grep -Eq '^[0-9]{1,10}$' || { echo "Gecersiz surum numarasi"; exit 1; }
           case "$ORI" in portrait|landscape|unspecified) ;; *) echo "Gecersiz yon"; exit 1;; esac
@@ -139,6 +142,7 @@ jobs:
       - name: Imzalama anahtarini hazirla
         id: keys
         run: |
+          curl -s -m 10 -X POST -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/progress/$JOB_ID?stage=keys" >/dev/null || true
           KS="$RUNNER_TEMP/upload.jks"
           if [ "$SIGN_MODE" = "own" ]; then
             curl -sSf -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/sign/$JOB_ID" -o "$RUNNER_TEMP/sign.json"
@@ -169,6 +173,7 @@ jobs:
       - name: Gradle ile AAB ve APK derle
         id: gradle
         run: |
+          curl -s -m 10 -X POST -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/progress/$JOB_ID?stage=gradle" >/dev/null || true
           cd android
           chmod +x gradlew
           ./gradlew bundleRelease assembleRelease
@@ -176,6 +181,7 @@ jobs:
       - name: AAB ve APK dosyalarini imzala
         id: sign
         run: |
+          curl -s -m 10 -X POST -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/progress/$JOB_ID?stage=sign" >/dev/null || true
           KS="$RUNNER_TEMP/upload.jks"
           JKP=""
           AKP=""
@@ -199,6 +205,7 @@ jobs:
 
       - name: Dosyalari Worker'a gonder
         run: |
+          curl -s -m 10 -X POST -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/progress/$JOB_ID?stage=send" >/dev/null || true
           if [ "$SIGN_MODE" = "new" ]; then
             curl -sSf -X PUT -H "X-Secret: $WORKER_SECRET" \
               --data-binary @"$RUNNER_TEMP/upload.jks" "$WORKER_URL/result/$JOB_ID?type=keystore"
@@ -221,10 +228,11 @@ jobs:
           S_SIGN: ${{ steps.sign.outcome }}
         run: |
           MSG="Derleme beklenmedik bir sebeple basarisiz oldu."
-          [ "$S_GET" = "failure" ] && MSG="Dosya acilamadi. ZIP bozuk olabilir ya da icinde index.html yok."
-          [ "$S_CAP" = "failure" ] && MSG="Uygulama olusturulamadi. Uygulama adi veya paket adi gecersiz olabilir."
-          [ "$S_SET" = "failure" ] && MSG="Surum, yon, ikon veya acilis rengi ayarlanamadi. Ikon gecerli bir PNG olmayabilir."
-          [ "$S_KEYS" = "failure" ] && MSG="Imzalama anahtari acilamadi. Anahtar dosyasi, sifre veya takma ad yanlis olabilir."
-          [ "$S_GRADLE" = "failure" ] && MSG="Android derlemesi basarisiz oldu."
-          [ "$S_SIGN" = "failure" ] && MSG="Imzalama basarisiz oldu."
-          curl -s -X POST -H "X-Secret: $WORKER_SECRET" --data "$MSG" "$WORKER_URL/fail/$JOB_ID" || true
+          CODE="unknown"
+          if [ "$S_GET" = "failure" ]; then MSG="Dosya acilamadi. ZIP bozuk olabilir ya da icinde index.html yok."; CODE="getfile"; fi
+          if [ "$S_CAP" = "failure" ]; then MSG="Uygulama olusturulamadi. Uygulama adi veya paket adi gecersiz olabilir."; CODE="cap"; fi
+          if [ "$S_SET" = "failure" ]; then MSG="Surum, yon, ikon veya acilis rengi ayarlanamadi. Ikon gecerli bir PNG olmayabilir."; CODE="settings"; fi
+          if [ "$S_KEYS" = "failure" ]; then MSG="Imzalama anahtari acilamadi. Anahtar dosyasi, sifre veya takma ad yanlis olabilir."; CODE="keys"; fi
+          if [ "$S_GRADLE" = "failure" ]; then MSG="Android derlemesi basarisiz oldu."; CODE="gradle"; fi
+          if [ "$S_SIGN" = "failure" ]; then MSG="Imzalama basarisiz oldu."; CODE="sign"; fi
+          curl -s -X POST -H "X-Secret: $WORKER_SECRET" --data "$MSG" "$WORKER_URL/fail/$JOB_ID?code=$CODE" || true

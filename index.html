@@ -1,227 +1,1275 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HTML to APK/AAB Builder - Prototip</title>
-    <style>
-        :root {
-            --bg-color: #0f172a;
-            --card-bg: #1e293b;
-            --primary: #3b82f6;
-            --primary-hover: #2563eb;
-            --text-main: #f8fafc;
-            --text-muted: #94a3b8;
-            --border: #334155;
-            --success: #22c55e;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#12161c">
+<title>APK ve AAB Dönüştürücü</title>
+<style>
+  :root {
+    --bg: #12161c;
+    --panel: #1b212a;
+    --line: #2c3541;
+    --text: #eef2f6;
+    --muted: #93a0b0;
+    --accent: #3ddc97;
+    --accent-ink: #07241a;
+    --warn: #ffb454;
+    --bad: #ff6b6b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  [hidden] { display: none !important; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.5;
+    padding: 20px 16px 56px;
+  }
+  main { max-width: 520px; margin: 0 auto; }
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
+  /* Açılış ekranı */
+  #splash {
+    position: fixed; inset: 0; z-index: 100;
+    background: var(--bg);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 18px;
+    transition: opacity 0.5s ease;
+  }
+  #splash.hide { opacity: 0; pointer-events: none; }
+  #splash svg { width: 168px; height: auto; }
+  .glyph {
+    fill: none; stroke: var(--accent); stroke-width: 12;
+    stroke-linecap: round; stroke-linejoin: round;
+    stroke-dasharray: 220; stroke-dashoffset: 220;
+    animation: draw 0.8s ease forwards;
+  }
+  .g2 { animation-delay: 0.25s; }
+  .g3 { animation-delay: 0.5s; }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+  .splash-title {
+    font-size: 1.25rem; font-weight: 700; letter-spacing: 0.04em;
+    opacity: 0; transform: translateY(12px);
+    animation: rise 0.6s 0.9s ease forwards;
+  }
+  .splash-sub {
+    color: var(--muted); font-size: 0.9rem;
+    opacity: 0; transform: translateY(12px);
+    animation: rise 0.6s 1.1s ease forwards;
+  }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .glyph, .splash-title, .splash-sub { animation-duration: 0.01s; animation-delay: 0s; }
+  }
 
-        body {
-            background-color: var(--bg-color);
-            color: var(--text-main);
-            padding: 20px;
-            min-height: 100vh;
-        }
+  /* Tanıtım ekranı */
+  #intro {
+    position: fixed; inset: 0; z-index: 90;
+    background: var(--bg);
+    display: flex; flex-direction: column;
+    padding: 20px 20px 28px;
+  }
+  #intro .skip {
+    align-self: flex-end; background: none; border: 0; color: var(--muted);
+    font-size: 0.95rem; padding: 8px; cursor: pointer;
+  }
+  #intro .slide {
+    flex: 1; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; text-align: center; gap: 14px; max-width: 420px; margin: 0 auto;
+  }
+  #intro .num {
+    width: 64px; height: 64px; border-radius: 50%;
+    border: 2px solid var(--accent); color: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.6rem; font-weight: 700;
+  }
+  #intro h2 { font-size: 1.5rem; line-height: 1.25; }
+  #intro p { color: var(--muted); font-size: 1rem; }
+  .dots { display: flex; justify-content: center; gap: 8px; margin: 12px 0 18px; }
+  .dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+  .dots i.on { background: var(--accent); }
+  #intro .next { max-width: 420px; width: 100%; margin: 0 auto; }
 
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-        }
+  /* Önizleme */
+  #preview {
+    position: fixed; inset: 0; z-index: 80;
+    background: #000; display: flex; flex-direction: column;
+  }
+  .pv-bar {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+    padding: 10px 12px;
+  }
+  .pv-bar strong { flex: none; }
+  .pv-note { flex: 1; color: var(--muted); font-size: 0.75rem; line-height: 1.3; }
+  .pv-bar button {
+    flex: none; background: var(--text); color: var(--bg); border: 0;
+    border-radius: 8px; padding: 8px 14px; font-weight: 700; cursor: pointer;
+  }
+  #pvFrame { flex: 1; width: 100%; border: 0; background: #fff; }
 
-        header {
-            text-align: center;
-            margin-bottom: 25px;
-        }
+  /* Üst başlık ve sekmeler */
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  header img { width: 44px; height: 44px; border-radius: 10px; }
+  header > div { flex: 1; min-width: 0; }
+  h1 { font-size: 1.3rem; line-height: 1.2; }
+  .lead { color: var(--muted); font-size: 0.9rem; }
+  .iconbtn {
+    flex: none; width: 36px; height: 36px; border-radius: 50%;
+    background: var(--panel); border: 1px solid var(--line); color: var(--text);
+    font-weight: 700; font-size: 1rem; cursor: pointer;
+  }
+  .tabs {
+    display: flex; gap: 6px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 12px; padding: 4px; margin-bottom: 16px;
+  }
+  .tabs button {
+    flex: 1; background: none; border: 0; color: var(--muted);
+    padding: 10px; border-radius: 9px; font-size: 0.95rem; font-weight: 600; cursor: pointer;
+  }
+  .tabs button[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); }
 
-        header h1 {
-            font-size: 1.5rem;
-            color: var(--primary);
-            margin-bottom: 5px;
-        }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 18px;
+    margin-bottom: 16px;
+  }
+  label { display: block; font-size: 0.9rem; color: var(--muted); margin: 14px 0 6px; }
+  .panel > label:first-child, .panel > .note + label { margin-top: 0; }
+  input[type="text"], input[type="number"], input[type="password"], select {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    color: var(--text);
+    font-size: 1rem;
+    padding: 12px;
+  }
+  input:focus-visible, select:focus-visible, button:focus-visible,
+  summary:focus-visible, .pick:focus-within {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  .row { display: flex; gap: 12px; }
+  .row > div { flex: 1; min-width: 0; }
+  .hint { font-size: 0.8rem; color: var(--muted); margin-top: 6px; }
+  .q {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; margin-left: 6px; border-radius: 50%;
+    background: none; border: 1px solid var(--accent); color: var(--accent);
+    font-size: 0.75rem; font-weight: 700; cursor: pointer; vertical-align: middle;
+  }
+  .help {
+    background: var(--bg); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 10px 12px; margin-bottom: 8px;
+    font-size: 0.85rem; color: var(--text);
+  }
+  .note {
+    border: 1px solid var(--accent); background: rgba(61, 220, 151, 0.08);
+    border-radius: 10px; padding: 12px; font-size: 0.88rem; margin-bottom: 14px;
+  }
+  .pick {
+    display: block;
+    border: 2px dashed var(--line);
+    border-radius: 10px;
+    padding: 18px 12px;
+    text-align: center;
+    color: var(--muted);
+    cursor: pointer;
+    word-break: break-all;
+  }
+  .pick.has-file { border-color: var(--accent); color: var(--text); }
+  .pick input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .iconrow { display: flex; align-items: center; gap: 12px; }
+  .iconrow .pick { flex: 1; padding: 14px 10px; }
+  #iconPrev {
+    width: 56px; height: 56px; border-radius: 12px;
+    border: 1px solid var(--line); object-fit: cover; display: none;
+  }
+  #checks {
+    margin-top: 12px; border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 12px; font-size: 0.85rem;
+  }
+  #checks.warn { border-color: var(--warn); background: rgba(255, 180, 84, 0.08); }
+  #checks.ok { border-color: var(--accent); color: var(--accent); }
+  #checks strong { display: block; margin-bottom: 4px; }
+  #checks ul { padding-left: 18px; }
+  #checks li { margin-top: 4px; color: var(--text); word-break: break-word; }
+  .btnrow { display: flex; gap: 10px; margin-top: 18px; }
+  .btnrow button { margin-top: 0; }
+  button.go {
+    flex: 1;
+    width: 100%;
+    background: var(--accent);
+    color: var(--accent-ink);
+    border: 0;
+    border-radius: 12px;
+    font-size: 1.1rem;
+    font-weight: 700;
+    padding: 16px;
+    cursor: pointer;
+  }
+  button.go:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.alt {
+    flex: none; background: transparent; color: var(--text);
+    border: 1px solid var(--line); border-radius: 12px;
+    font-size: 1rem; font-weight: 600; padding: 16px 18px; cursor: pointer;
+  }
+  #formErr { color: var(--bad); font-size: 0.9rem; margin-top: 12px; display: none; }
 
-        header p {
-            color: var(--text-muted);
-            font-size: 0.9rem;
-        }
+  /* Gelişmiş ayarlar */
+  details.adv { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
+  details.adv > summary {
+    cursor: pointer; font-weight: 600; list-style: none;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 0;
+  }
+  details.adv > summary::-webkit-details-marker { display: none; }
+  details.adv > summary::after { content: "+"; color: var(--accent); font-size: 1.3rem; }
+  details.adv[open] > summary::after { content: "\2212"; }
+  .swatches { display: flex; gap: 10px; flex-wrap: wrap; }
+  .sw {
+    width: 36px; height: 36px; border-radius: 50%;
+    border: 2px solid var(--line); cursor: pointer;
+  }
+  .sw.sel { border-color: var(--text); box-shadow: 0 0 0 2px var(--accent); }
 
-        .card {
-            background-color: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        }
+  /* Ilerleme */
+  #status { display: none; }
+  .steps { list-style: none; display: grid; gap: 10px; }
+  .steps li { display: flex; align-items: center; gap: 12px; color: var(--muted); }
+  .steps li::before {
+    content: ""; width: 22px; height: 22px; border-radius: 50%;
+    border: 2px solid var(--line); flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 0.8rem; font-weight: 700;
+  }
+  .steps li[data-s="run"] { color: var(--text); }
+  .steps li[data-s="run"]::before {
+    border-color: var(--line); border-top-color: var(--accent);
+    animation: spin 0.9s linear infinite;
+  }
+  .steps li[data-s="done"] { color: var(--text); }
+  .steps li[data-s="done"]::before {
+    content: "\2713"; background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+  }
+  .steps li[data-s="fail"] { color: var(--bad); }
+  .steps li[data-s="fail"]::before {
+    content: "!"; border-color: var(--bad); color: var(--bad);
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #msg { margin-top: 14px; font-size: 0.95rem; }
+  #msg.bad { color: var(--bad); }
+  #msg.ok { color: var(--accent); }
+  details.logd { margin-top: 12px; }
+  details.logd > summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; }
+  #log {
+    margin-top: 8px;
+    background: #0a0d11;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+    color: var(--muted);
+    max-height: 140px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+  }
 
-        .card h2 {
-            font-size: 1.1rem;
-            margin-bottom: 15px;
-            border-bottom: 1px solid var(--border);
-            padding-bottom: 8px;
-        }
+  /* Sonuc karti */
+  #result { display: none; }
+  .appcard { display: flex; align-items: center; gap: 14px; margin-bottom: 4px; }
+  .appcard img { width: 64px; height: 64px; border-radius: 14px; border: 1px solid var(--line); object-fit: cover; }
+  #resName { font-weight: 700; font-size: 1.1rem; }
+  #resMeta { color: var(--muted); font-size: 0.82rem; word-break: break-all; }
+  a.dl {
+    display: none;
+    margin-top: 12px;
+    text-align: center;
+    background: var(--text);
+    color: var(--bg);
+    border-radius: 12px;
+    font-weight: 700;
+    padding: 14px;
+    text-decoration: none;
+  }
+  a.dl.second { background: transparent; color: var(--text); border: 1px solid var(--line); }
+  #keybox {
+    display: none;
+    margin-top: 14px;
+    border: 1px solid var(--warn);
+    background: rgba(255, 180, 84, 0.08);
+    border-radius: 10px;
+    padding: 12px;
+    font-size: 0.85rem;
+  }
+  #keybox pre {
+    margin-top: 8px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    color: var(--text);
+  }
 
-        .form-group {
-            margin-bottom: 15px;
-        }
-
-        label {
-            display: block;
-            font-size: 0.85rem;
-            color: var(--text-muted);
-            margin-bottom: 5px;
-        }
-
-        input[type="text"], input[type="file"] {
-            width: 100%;
-            padding: 10px 12px;
-            background-color: var(--bg-color);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            color: var(--text-main);
-            font-size: 0.95rem;
-        }
-
-        input[type="text"]:focus {
-            outline: none;
-            border-color: var(--primary);
-        }
-
-        .file-drop-area {
-            border: 2px dashed var(--border);
-            border-radius: 8px;
-            padding: 20px;
-            text-align: center;
-            cursor: pointer;
-            transition: border-color 0.2s;
-        }
-
-        .file-drop-area:hover {
-            border-color: var(--primary);
-        }
-
-        .btn {
-            display: block;
-            width: 100%;
-            padding: 12px;
-            background-color: var(--primary);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background-color 0.2s;
-            text-align: center;
-        }
-
-        .btn:hover {
-            background-color: var(--primary-hover);
-        }
-
-        .log-box {
-            background-color: #020617;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 12px;
-            font-family: monospace;
-            font-size: 0.8rem;
-            color: var(--success);
-            height: 120px;
-            overflow-y: auto;
-            display: none;
-            margin-top: 15px;
-        }
-    </style>
+  /* Projelerim */
+  .empty { color: var(--muted); text-align: center; padding: 28px 12px; font-size: 0.95rem; }
+  .proj { display: flex; gap: 14px; align-items: flex-start; }
+  .proj img { width: 56px; height: 56px; border-radius: 12px; border: 1px solid var(--line); object-fit: cover; flex: none; }
+  .proj .info { flex: 1; min-width: 0; }
+  .proj .name { font-weight: 700; }
+  .proj .meta { color: var(--muted); font-size: 0.8rem; word-break: break-all; }
+  .proj .acts { display: flex; gap: 8px; margin-top: 10px; }
+  .proj .acts button {
+    border-radius: 9px; padding: 8px 14px; font-size: 0.88rem; font-weight: 600; cursor: pointer;
+    background: transparent; color: var(--text); border: 1px solid var(--line);
+  }
+  .proj .acts button.pri { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .authbar {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 10px 12px; margin-bottom: 12px;
+  }
+  .authbar .who { flex: 1; min-width: 0; font-size: 0.9rem; }
+  .authbar #authInfo { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .authbar button.alt { padding: 9px 12px; font-size: 0.85rem; }
+  #authMsg { color: var(--bad); }
+</style>
 </head>
 <body>
 
-    <div class="container">
-        <header>
-            <h1>APK & AAB Builder</h1>
-            <p>HTML5 Projelerini Android Paketlerine Dönüştürün</p>
-        </header>
+<div id="splash" role="presentation">
+  <svg viewBox="0 0 200 160" aria-hidden="true">
+    <polyline class="glyph" points="70,40 20,80 70,120"/>
+    <line class="glyph g2" x1="115" y1="30" x2="85" y2="130"/>
+    <polyline class="glyph g3" points="130,40 180,80 130,120"/>
+  </svg>
+  <div class="splash-title">APK + AAB</div>
+  <div class="splash-sub">HTML projeni uygulamaya çevir</div>
+</div>
 
-        <!-- Uygulama Bilgileri -->
-        <div class="card">
-            <h2>1. Uygulama Kimliği</h2>
-            <div class="form-group">
-                <label>Uygulama Adı</label>
-                <input type="text" id="appName" placeholder="Örn: Zümrüt Macera">
-            </div>
-            <div class="form-group">
-                <label>Paket Adı (Package Name)</label>
-                <input type="text" id="packageName" placeholder="Örn: com.kullanici.zumrutoyun">
-            </div>
-            <div class="form-group">
-                <label>Uygulama İkonu (PNG)</label>
-                <input type="file" id="appIcon" accept="image/png">
-            </div>
-        </div>
+<div id="intro" hidden role="dialog" aria-label="Nasıl kullanılır">
+  <button class="skip" id="introSkip" type="button">Atla</button>
+  <div class="slide">
+    <div class="num" id="introNum">1</div>
+    <h2 id="introTitle"></h2>
+    <p id="introText"></p>
+  </div>
+  <div class="dots" id="introDots"></div>
+  <button class="go next" id="introNext" type="button">İleri</button>
+</div>
 
-        <!-- Proje Dosyaları -->
-        <div class="card">
-            <h2>2. Proje Dosyaları (HTML/JS)</h2>
-            <div class="form-group">
-                <label>Proje Klasörü / ZIP Arşivi</label>
-                <div class="file-drop-area" onclick="document.getElementById('projectFiles').click()">
-                    <span id="fileLabel">index.html ve kaynak dosyalarını içeren ZIP seçin</span>
-                    <input type="file" id="projectFiles" accept=".zip" style="display: none;" onchange="handleFileSelect(this)">
-                </div>
-            </div>
-        </div>
+<div id="preview" hidden role="dialog" aria-label="Önizleme">
+  <div class="pv-bar">
+    <strong>Önizleme</strong>
+    <span class="pv-note">Kayıt ve bazı bağlantılar önizlemede çalışmayabilir, uygulamada çalışır.</span>
+    <button id="pvClose" type="button">Kapat</button>
+  </div>
+  <iframe id="pvFrame" title="Sayfa önizlemesi" sandbox="allow-scripts allow-forms allow-modals allow-pointer-lock"></iframe>
+</div>
 
-        <!-- İşlem Butonu -->
-        <button class="btn" onclick="startPackaging()">APK / AAB Paketini Hazırla</button>
-
-        <!-- Durum Günlükleri -->
-        <div id="logBox" class="log-box"></div>
+<main>
+  <header>
+    <img id="logo" alt="">
+    <div>
+      <h1>HTML'i APK ve AAB'ye çevir</h1>
+      <p class="lead">Dosyanı seç, derle, indir.</p>
     </div>
+    <button class="iconbtn" id="helpBtn" type="button" aria-label="Nasıl kullanılır">?</button>
+  </header>
 
-    <script>
-        function handleFileSelect(input) {
-            const label = document.getElementById('fileLabel');
-            if (input.files && input.files.length > 0) {
-                label.textContent = "Seçilen Dosya: " + input.files[0].name;
-            }
+  <div class="authbar" id="authBar">
+    <div class="who">
+      <div id="authInfo">Misafir olarak kullanıyorsun</div>
+      <div class="hint" id="quota"></div>
+      <div class="hint" id="authMsg" hidden></div>
+    </div>
+    <button class="alt" id="signInBtn" type="button" hidden>Google ile giriş</button>
+    <button class="alt" id="signOutBtn" type="button" hidden>Çıkış</button>
+  </div>
+
+  <nav class="tabs" role="tablist">
+    <button id="tabBuild" role="tab" aria-selected="true" type="button">Derle</button>
+    <button id="tabProj" role="tab" aria-selected="false" type="button">Projelerim</button>
+  </nav>
+
+  <div id="viewBuild">
+    <section class="panel">
+      <div class="note" id="note" hidden></div>
+
+      <label for="appName">Uygulama adı</label>
+      <input type="text" id="appName" placeholder="Zümrüt Macera" maxlength="40" autocomplete="off">
+
+      <label for="zip">Proje dosyası (HTML veya ZIP)</label>
+      <label class="pick" id="pickBox">
+        <span id="pickText">Dosya seçmek için dokun (en fazla 20 MB)</span>
+        <input type="file" id="zip" accept=".html,.htm,.zip,text/html,application/zip">
+      </label>
+      <p class="hint">Tek HTML seçersen o dosya uygulamanın ana sayfası olur. ZIP seçersen içinde index.html bulunmalı.</p>
+      <div id="checks" hidden></div>
+
+      <details class="adv" id="adv">
+        <summary>Gelişmiş ayarlar</summary>
+
+        <label for="pkg">Paket adı (otomatik, istersen değiştir)<button class="q" type="button" data-h="h-pkg" aria-label="Paket adı nedir?">?</button></label>
+        <div class="help" id="h-pkg" hidden>Paket adı, uygulamanın Android'deki benzersiz kimliğidir, kullanıcılar görmez. Her uygulamanın paket adı farklı olmalı ve Play Store'a yüklendikten sonra değiştirilemez. Bu yüzden bir yere not et.</div>
+        <input type="text" id="pkg" placeholder="Uygulama adını yazınca burası dolar" autocomplete="off" autocapitalize="none" spellcheck="false">
+        <p class="hint">Uygulama adından otomatik üretilir. Güncelleme yaparken aynı uygulama adını yaz, aynı paket adı gelir. Kendin yazarsan: küçük İngilizce harf, rakam ve alt çizgi, en az iki parça, noktayla ayrılmış.</p>
+
+        <div class="row">
+          <div>
+            <label for="vName">Sürüm adı</label>
+            <input type="text" id="vName" value="1.0.0" maxlength="20" autocomplete="off" autocapitalize="none">
+          </div>
+          <div>
+            <label for="vCode">Sürüm numarası<button class="q" type="button" data-h="h-ver" aria-label="Sürüm numarası nedir?">?</button></label>
+            <input type="number" id="vCode" value="1" min="1" inputmode="numeric">
+          </div>
+        </div>
+        <div class="help" id="h-ver" hidden style="margin-top:8px">Sürüm adı, kullanıcıların gördüğü yazıdır (1.0.0). Sürüm numarası ise Play Store'un kullandığı sayıdır ve her yeni sürümde 1 artarak yüklenmelidir (1, 2, 3...).</div>
+
+        <label for="ori">Ekran yönü</label>
+        <select id="ori">
+          <option value="unspecified">Otomatik (telefon döndükçe)</option>
+          <option value="portrait">Dikey</option>
+          <option value="landscape">Yatay</option>
+        </select>
+
+        <label for="icon">Uygulama ikonu (isteğe bağlı, PNG)</label>
+        <div class="iconrow">
+          <img id="iconPrev" alt="İkon önizleme">
+          <label class="pick" id="iconBox">
+            <span id="iconText">PNG ikon seç (kare, en az 192 piksel, en fazla 1 MB)</span>
+            <input type="file" id="icon" accept="image/png">
+          </label>
+        </div>
+
+        <label>Açılış ekranı rengi<button class="q" type="button" data-h="h-splash" aria-label="Açılış ekranı rengi nedir?">?</button></label>
+        <div class="help" id="h-splash" hidden>Uygulama açılırken, sayfan yüklenene kadar görünen arka plan rengi. Sayfanın arka plan rengine yakın bir renk seçersen geçiş daha yumuşak olur.</div>
+        <div class="swatches" id="swatches" role="radiogroup" aria-label="Açılış ekranı rengi">
+          <button type="button" class="sw sel" data-c="#12161c" style="background:#12161c" aria-label="Koyu"></button>
+          <button type="button" class="sw" data-c="#ffffff" style="background:#ffffff" aria-label="Beyaz"></button>
+          <button type="button" class="sw" data-c="#0b57d0" style="background:#0b57d0" aria-label="Mavi"></button>
+          <button type="button" class="sw" data-c="#1b873f" style="background:#1b873f" aria-label="Yeşil"></button>
+          <button type="button" class="sw" data-c="#b3261e" style="background:#b3261e" aria-label="Kırmızı"></button>
+          <button type="button" class="sw" data-c="#6750a4" style="background:#6750a4" aria-label="Mor"></button>
+        </div>
+
+        <label for="signMode">İmzalama anahtarı<button class="q" type="button" data-h="h-sign" aria-label="Anahtar nedir?">?</button></label>
+        <div class="help" id="h-sign" hidden>İmzalama anahtarı, uygulamanın sana ait olduğunu kanıtlayan bir dosyadır. İlk yayında "Yeni anahtar üret" seç ve verilen dosya ile şifreyi sakla. Güncelleme yaparken aynı anahtarı yüklemelisin. Anahtarı kaybedersen uygulamanı güncelleyemezsin.</div>
+        <select id="signMode">
+          <option value="new">Yeni anahtar üret (ilk yayın)</option>
+          <option value="own">Kendi anahtarımı kullan (güncelleme)</option>
+        </select>
+        <p class="hint">Yeni anahtar seçersen derleme sonunda sana bir anahtar dosyası ve şifre verilir.</p>
+        <div id="ownBox" style="display:none">
+          <label class="pick" id="ksBox" style="margin-top:14px">
+            <span id="ksText">Anahtar dosyasını seç (.jks, .keystore, .p12)</span>
+            <input type="file" id="ks">
+          </label>
+          <label for="alias">Anahtar takma adı (alias)</label>
+          <input type="text" id="alias" autocomplete="off" autocapitalize="none" spellcheck="false">
+          <label for="sPass">Anahtar dosyası şifresi</label>
+          <input type="password" id="sPass" autocomplete="off">
+          <label for="kPass">Anahtar şifresi (dosya şifresinden farklıysa)</label>
+          <input type="password" id="kPass" autocomplete="off">
+          <p class="hint">Dosya ve şifreler yalnızca bu derleme için geçici saklanır. Derleme başlayınca silinir, başlamazsa en geç 1 saat sonra kendiliğinden silinir.</p>
+        </div>
+      </details>
+
+      <p id="formErr" role="alert"></p>
+      <div class="btnrow">
+        <button class="alt" id="previewBtn" type="button" hidden>Önizle</button>
+        <button class="go" id="go" type="button">Derle</button>
+      </div>
+    </section>
+
+    <section class="panel" id="status">
+      <ol class="steps" id="steps">
+        <li data-s="wait">Dosya yüklendi</li>
+        <li data-s="wait">Android projesi hazırlanıyor</li>
+        <li data-s="wait">İmzalama anahtarı hazırlanıyor</li>
+        <li data-s="wait">Uygulama derleniyor</li>
+        <li data-s="wait">Dosyalar imzalanıyor</li>
+        <li data-s="wait">Hazır</li>
+      </ol>
+      <p class="hint" id="timer"></p>
+      <div id="msg"></div>
+      <div class="help" id="tip" hidden style="margin-top:12px"></div>
+      <button class="alt" id="retryBtn" type="button" hidden style="margin-top:12px">Tekrar dene</button>
+      <details class="logd">
+        <summary>Ayrıntılar</summary>
+        <div id="log"></div>
+      </details>
+    </section>
+
+    <section class="panel" id="result">
+      <div class="appcard">
+        <img id="resIcon" alt="">
+        <div>
+          <div id="resName"></div>
+          <div id="resMeta"></div>
+        </div>
+      </div>
+      <a class="dl" id="dlApk" download="app-release.apk">APK indir (telefona kurmak için)</a>
+      <a class="dl second" id="dlAab" download="app-release.aab">AAB indir (Play Store için)</a>
+      <a class="dl second" id="dlKs" download="upload-keystore.jks">Anahtar dosyasını indir (.jks)</a>
+      <a class="dl second" id="dlKi" download="anahtar-bilgisi.txt">Anahtar bilgisini indir (.txt)</a>
+      <div id="keybox">
+        <strong>Bu anahtarı kaybetme.</strong> Uygulamayı güncellerken aynı anahtar ve şifre gerekir. İki dosyayı da güvenli bir yere kaydet ve kimseyle paylaşma.
+        <pre id="keyText"></pre>
+      </div>
+    </section>
+  </div>
+
+  <div id="viewProjects" hidden>
+    <div id="projList"></div>
+  </div>
+</main>
+
+<script>
+  const WORKER = "https://apk-builder.emirhanelci730.workers.dev";
+  const MAX_BYTES = 20 * 1024 * 1024;
+  const MAX_ICON = 1024 * 1024;
+  const MAX_CHECK = 5 * 1024 * 1024;
+  const POLL_MS = 3000;
+  const MAX_WAIT_MS = 15 * 60 * 1000;
+  const ICON_TEXT = "PNG ikon seç (kare, en az 192 piksel, en fazla 1 MB)";
+  const DEFAULT_ICON = "data:image/svg+xml;utf8," + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#12161c"/>' +
+    '<path d="M38 34 22 50l16 16M62 34l16 16-16 16M54 30 46 70" fill="none" stroke="#3ddc97" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+  );
+
+  const $ = (id) => document.getElementById(id);
+  const msg = $("msg"), logBox = $("log");
+  let iconFile = null, iconOk = true, iconUrl = "";
+  let currentMode = "new";
+  let splashColor = "#12161c";
+  let curStep = 0;
+  let timerId = null, t0 = 0;
+  const STAGE_STEP = { getfile: 1, cap: 1, settings: 1, keys: 2, gradle: 3, sign: 4, send: 5 };
+  const TIPS = {
+    getfile: "ZIP seçtiysen içinde index.html olduğundan ve dosyaların klasör içinde değil doğrudan ZIP'in içinde olduğundan emin ol. Sonra tekrar dene.",
+    cap: "Uygulama adında tırnak, dolar işareti ya da ters bölü olmasın. Paket adı küçük harf, rakam ve noktalardan oluşmalı. Düzeltip tekrar dene.",
+    settings: "İkon geçerli bir PNG olmayabilir. Başka bir PNG seç ya da ikonu kaldırıp tekrar dene.",
+    keys: "Kendi anahtarını yüklediysen dosyayı, takma adı (alias) ve şifreyi kontrol et. Emin değilsen ilk yayın için Yeni anahtar üret seç.",
+    gradle: "Android derlemesi kırıldı. Bu genelde geçicidir, tekrar dene. Sürerse Ayrıntılar bölümünü kopyalayıp bildir.",
+    sign: "İmzalama başarısız oldu. Anahtar dosyası bozuk olabilir. Anahtarı kontrol et ya da yeni anahtar üret (yeni anahtarla mevcut uygulamanı güncelleyemezsin).",
+    expired: "Dosyalar 1 saat sonra silinir. Aynı bilgilerle yeniden derle.",
+    timeout: "GitHub tarafında sıra olabilir. Birkaç dakika sonra tekrar dene. Sürerse Ayrıntılar bölümünü kopyalayıp bildir.",
+    network: "İnternet bağlantını kontrol et ve tekrar dene.",
+    auth: "Devam etmek için sayfanın üstündeki Google ile giriş düğmesine bas, sonra tekrar dene.",
+    unknown: "Beklenmedik bir hata oldu. Tekrar dene. Sürerse Ayrıntılar bölümünü kopyalayıp bildir."
+  };
+
+  function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } }
+
+  $("logo").src = DEFAULT_ICON;
+
+  // ---- Google ile giris (yalnizca web surumu) ----
+  const FIREBASE_CONFIG = {
+    apiKey: "AIzaSyA3tK8QyZZUVCqt1OsABvltUNDMABW-2BM",
+    authDomain: "apk-builder-studio.firebaseapp.com",
+    projectId: "apk-builder-studio",
+    appId: "1:400507520290:web:b11cb3bd9016f89a62517b"
+  };
+  const IN_APP = (function () {
+    try {
+      const c = window.Capacitor;
+      if (c && typeof c.isNativePlatform === "function" && c.isNativePlatform()) return true;
+    } catch (e) {}
+    return /; wv\)/.test(navigator.userAgent);
+  })();
+  let fbAuth = null, currentUser = null;
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const el = document.createElement("script");
+      el.src = src;
+      el.onload = resolve;
+      el.onerror = () => reject(new Error("yuklenemedi"));
+      document.head.appendChild(el);
+    });
+  }
+  async function authHeaders() {
+    if (!currentUser) return {};
+    try { return { Authorization: "Bearer " + (await currentUser.getIdToken()) }; } catch (e) { return {}; }
+  }
+  function showAuthMsg(t) {
+    const m = $("authMsg");
+    m.textContent = t || "";
+    m.hidden = !t;
+  }
+  function renderAuth() {
+    const signedIn = !!currentUser;
+    $("authInfo").textContent = signedIn
+      ? (currentUser.displayName || currentUser.email || "Google hesabı")
+      : "Misafir olarak kullanıyorsun";
+    $("signInBtn").hidden = signedIn || !fbAuth;
+    $("signOutBtn").hidden = !signedIn;
+    if (signedIn) showAuthMsg("");
+  }
+  async function refreshQuota() {
+    try {
+      const r = await fetch(WORKER + "/me", { headers: await authHeaders() });
+      const j = await r.json();
+      $("quota").textContent = typeof j.remaining === "number"
+        ? "Bugün kalan derleme hakkı: " + j.remaining + " / " + j.limit
+        : "";
+    } catch (e) {
+      $("quota").textContent = "";
+    }
+  }
+  async function fileUrl(id, type) {
+    // Giris yapmis kullanici icin kisa omurlu imzali baglanti, degilse dogrudan baglanti
+    if (currentUser) {
+      try {
+        const r = await fetch(WORKER + "/link/" + id + "?type=" + type, { headers: await authHeaders() });
+        if (r.ok) {
+          const j = await r.json();
+          if (j.url) return j.url;
         }
+      } catch (e) {}
+    }
+    return WORKER + "/download/" + id + "?type=" + type;
+  }
+  async function initAuth() {
+    if (IN_APP) {
+      $("authInfo").textContent = "Misafir olarak kullanıyorsun";
+      showAuthMsg("Google girişi şimdilik web sürümünde çalışıyor. Uygulamada misafir olarak devam edebilirsin.");
+      refreshQuota();
+      return;
+    }
+    try {
+      await loadScript("https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js");
+      await loadScript("https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js");
+      firebase.initializeApp(FIREBASE_CONFIG);
+      fbAuth = firebase.auth();
+      fbAuth.onAuthStateChanged((u) => {
+        currentUser = u;
+        renderAuth();
+        refreshQuota();
+      });
+      renderAuth();
+    } catch (e) {
+      showAuthMsg("Giriş servisi yüklenemedi, misafir olarak devam edebilirsin.");
+      refreshQuota();
+    }
+  }
+  $("signInBtn").addEventListener("click", async () => {
+    if (!fbAuth) return;
+    showAuthMsg("");
+    try {
+      const provider = new firebase.auth.GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: "select_account" });
+      await fbAuth.signInWithPopup(provider);
+    } catch (e) {
+      const msgs = {
+        "auth/popup-blocked": "Açılır pencere engellendi. Tarayıcıda bu site için açılır pencereye izin ver.",
+        "auth/unauthorized-domain": "Bu adres Firebase'de yetkili değil. Firebase, Authentication, Settings, Authorized domains listesine ekle.",
+        "auth/operation-not-supported-in-this-environment": "Bu tarayıcı Google girişini desteklemiyor. Sayfayı Chrome'da aç.",
+        "auth/network-request-failed": "İnternet bağlantını kontrol et."
+      };
+      if (e.code === "auth/popup-closed-by-user" || e.code === "auth/cancelled-popup-request") return;
+      showAuthMsg(msgs[e.code] || ("Giriş yapılamadı: " + (e.message || e.code)));
+    }
+  });
+  $("signOutBtn").addEventListener("click", () => { if (fbAuth) fbAuth.signOut(); });
 
-        function startPackaging() {
-            const appName = document.getElementById('appName').value.trim();
-            const packageName = document.getElementById('packageName').value.trim();
-            const projectFile = document.getElementById('projectFiles').files[0];
-            const logBox = document.getElementById('logBox');
+  // ---- Tanitim ekrani ----
+  const SLIDES = [
+    ["Dosyanı seç", "HTML dosyanı ya da ZIP'ini seç ve uygulamana bir ad ver. Tek HTML dosyası yeterli."],
+    ["Derle ve indir", "Birkaç dakikada APK ve AAB hazır olur. APK'yı telefonuna kurup dene, AAB'yi Play Store'a yükle."],
+    ["Anahtarını sakla", "İlk derlemede sana bir anahtar dosyası ve şifre verilir. Uygulamayı güncellerken aynı anahtar gerekir, kaybetme."]
+  ];
+  let introIdx = 0;
+  function renderIntro() {
+    $("introNum").textContent = String(introIdx + 1);
+    $("introTitle").textContent = SLIDES[introIdx][0];
+    $("introText").textContent = SLIDES[introIdx][1];
+    $("introNext").textContent = introIdx === SLIDES.length - 1 ? "Başla" : "İleri";
+    const d = $("introDots");
+    d.textContent = "";
+    SLIDES.forEach((_, i) => {
+      const el = document.createElement("i");
+      if (i === introIdx) el.className = "on";
+      d.appendChild(el);
+    });
+  }
+  function openIntro() { introIdx = 0; renderIntro(); $("intro").hidden = false; }
+  function closeIntro() { $("intro").hidden = true; lsSet("onboarded", "1"); }
+  $("introNext").addEventListener("click", () => {
+    if (introIdx >= SLIDES.length - 1) return closeIntro();
+    introIdx++;
+    renderIntro();
+  });
+  $("introSkip").addEventListener("click", closeIntro);
+  $("helpBtn").addEventListener("click", openIntro);
 
-            if (!appName || !packageName || !projectFile) {
-                alert("Lütfen tüm alanları doldurun ve proje ZIP dosyasını seçin!");
-                return;
-            }
+  // ---- Acilis ekrani ----
+  (function () {
+    const el = $("splash");
+    const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let closed = false;
+    function close() {
+      if (closed) return;
+      closed = true;
+      el.classList.add("hide");
+      setTimeout(() => el.remove(), 600);
+      if (!lsGet("onboarded")) openIntro();
+    }
+    el.addEventListener("click", close);
+    setTimeout(close, reduced ? 500 : 2300);
+  })();
 
-            logBox.style.display = 'block';
-            logBox.innerHTML = "> Yapılandırma dosyaları doğrulanıyor...<br>";
+  // ---- Yardim baloncuklari ----
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest(".q");
+    if (!b) return;
+    e.preventDefault();
+    const h = $(b.dataset.h);
+    if (h) h.hidden = !h.hidden;
+  });
 
-            setTimeout(() => {
-                logBox.innerHTML += `> Uygulama Adı (${appName}) ve Paket Adı (${packageName}) işlendi.<br>`;
-            }, 800);
+  // ---- Sekmeler ----
+  function switchTab(name) {
+    const proj = name === "proj";
+    $("viewBuild").hidden = proj;
+    $("viewProjects").hidden = !proj;
+    $("tabBuild").setAttribute("aria-selected", String(!proj));
+    $("tabProj").setAttribute("aria-selected", String(proj));
+    if (proj) renderProjects();
+    window.scrollTo(0, 0);
+  }
+  $("tabBuild").addEventListener("click", () => switchTab("build"));
+  $("tabProj").addEventListener("click", () => switchTab("proj"));
 
-            setTimeout(() => {
-                logBox.innerHTML += `> ${projectFile.name} arşivi açılıyor ve WebView iskeletine entegre ediliyor...<br>`;
-            }, 1800);
+  // ---- Otomatik paket adi ----
+  const TR_MAP = { "ç": "c", "ğ": "g", "ı": "i", "ö": "o", "ş": "s", "ü": "u", "â": "a", "î": "i", "û": "u" };
+  const SESSION_SUFFIX = (() => {
+    const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+    const a = new Uint8Array(5);
+    (window.crypto || window.msCrypto).getRandomValues(a);
+    return Array.from(a, (x) => chars[x % 36]).join("");
+  })();
+  let pkgEdited = false;
 
-            setTimeout(() => {
-                logBox.innerHTML += `> Gradle derleme kuyruğuna gönderildi...<br>`;
-            }, 2800);
+  function slugify(name) {
+    let t = name.toLocaleLowerCase("tr").replace(/[çğıöşüâîû]/g, (c) => TR_MAP[c]);
+    t = t.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    return t.replace(/[^a-z0-9]/g, "").slice(0, 24);
+  }
+  function loadMap() {
+    try { return JSON.parse(lsGet("pkgMap") || "{}"); } catch (e) { return {}; }
+  }
+  function rememberPkg(name, pkg) {
+    const slug = slugify(name);
+    if (!slug) return;
+    const m = loadMap();
+    m[slug] = pkg;
+    lsSet("pkgMap", JSON.stringify(m));
+  }
+  function suggestPkg(name) {
+    const slug = slugify(name);
+    if (!slug) return "";
+    const saved = loadMap()[slug];
+    if (saved) return saved;
+    const base = /^[a-z]/.test(slug) ? slug : "a" + slug;
+    return "com.app." + base + SESSION_SUFFIX;
+  }
+  $("appName").addEventListener("input", () => {
+    if (!pkgEdited) $("pkg").value = suggestPkg($("appName").value);
+  });
+  $("pkg").addEventListener("input", () => {
+    pkgEdited = $("pkg").value.trim() !== "";
+  });
 
-            setTimeout(() => {
-                logBox.innerHTML += `<span style="color: #38bdf8;">> Başarılı! APK / AAB çıktısı hazırlandı (Simülasyon).</span>`;
-            }, 4000);
+  // ---- Imzalama, renk ----
+  $("signMode").addEventListener("change", () => {
+    $("ownBox").style.display = $("signMode").value === "own" ? "block" : "none";
+  });
+  $("ks").addEventListener("change", (e) => {
+    const f = e.target.files[0];
+    $("ksBox").classList.toggle("has-file", !!f);
+    $("ksText").textContent = f ? f.name : "Anahtar dosyasını seç (.jks, .keystore, .p12)";
+  });
+  function selectSwatch(c) {
+    document.querySelectorAll(".sw").forEach((x) => x.classList.toggle("sel", x.dataset.c === c));
+    splashColor = c;
+  }
+  $("swatches").addEventListener("click", (e) => {
+    const b = e.target.closest(".sw");
+    if (b) selectSwatch(b.dataset.c);
+  });
+
+  // ---- Ikon ----
+  function setIcon(f, label) {
+    const prev = $("iconPrev");
+    iconFile = f || null;
+    iconOk = true;
+    if (iconUrl) { try { URL.revokeObjectURL(iconUrl); } catch (e) {} iconUrl = ""; }
+    $("iconBox").classList.toggle("has-file", !!f);
+    if (!f) {
+      prev.style.display = "none";
+      $("iconText").textContent = ICON_TEXT;
+      return;
+    }
+    $("iconText").textContent = label || (f.name + " (" + Math.round(f.size / 1024) + " KB)");
+    iconUrl = URL.createObjectURL(f);
+    prev.onload = () => {
+      prev.style.display = "block";
+      if (prev.naturalWidth < 192 || prev.naturalHeight < 192) {
+        iconOk = false;
+        $("iconText").textContent = "İkon en az 192x192 piksel olmalı (seçilen: " + prev.naturalWidth + "x" + prev.naturalHeight + ")";
+      } else if (prev.naturalWidth !== prev.naturalHeight) {
+        $("iconText").textContent += " , kare değil, ortadan kırpılacak";
+      }
+    };
+    prev.src = iconUrl;
+  }
+  $("icon").addEventListener("change", (e) => setIcon(e.target.files[0]));
+
+  function makeThumb() {
+    return new Promise((resolve) => {
+      if (!iconFile || !iconUrl) return resolve("");
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const c = document.createElement("canvas");
+          c.width = c.height = 256;
+          const s = Math.min(img.naturalWidth, img.naturalHeight);
+          const sx = (img.naturalWidth - s) / 2, sy = (img.naturalHeight - s) / 2;
+          c.getContext("2d").drawImage(img, sx, sy, s, s, 0, 0, 256, 256);
+          resolve(c.toDataURL("image/png"));
+        } catch (e) { resolve(""); }
+      };
+      img.onerror = () => resolve("");
+      img.src = iconUrl;
+    });
+  }
+
+  // ---- Proje dosyasi: kontrol ve onizleme ----
+  let htmlText = "";
+
+  function readText(f) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result));
+      r.onerror = () => reject(r.error || new Error("okunamadı"));
+      r.readAsText(f);
+    });
+  }
+
+  function analyzeHtml(t) {
+    const w = [];
+    if (!/<(html|body|script|div|canvas)\b/i.test(t)) w.push("Bu dosya HTML gibi görünmüyor.");
+    if (!/<meta[^>]+name=["']?viewport/i.test(t))
+      w.push("Viewport etiketi yok, sayfa telefonda küçük görünebilir. head içine viewport meta etiketi ekle.");
+    const http = t.match(/["'(\s]http:\/\/(?!www\.w3\.org|localhost|127\.0\.0\.1)[^\s"'()<>]+/gi);
+    if (http)
+      w.push("http:// ile başlayan " + http.length + " bağlantı var (örnek: " + http[0].replace(/^["'(\s]+/, "").slice(0, 60) +
+        "). Android güvenli olmayan bağlantıları engelleyebilir, https:// kullan.");
+    const local = Array.from(t.matchAll(/(?:src|href)\s*=\s*["']([^"'#?]+\.(?:png|jpe?g|gif|svg|webp|ico|mp3|wav|ogg|mp4|webm|css|js|json|woff2?|ttf))["']/gi))
+      .map((m) => m[1])
+      .filter((u) => !/^(https?:|data:|blob:|\/\/|mailto:|javascript:)/i.test(u));
+    if (local.length)
+      w.push("Dosya yan dosyalara bağlanıyor (" + local[0] + (local.length > 1 ? " ve " + (local.length - 1) + " tane daha" : "") +
+        "). Tek HTML seçtiğin için bunlar uygulamaya girmez. Dosyaları ZIP içinde yükle.");
+    return w;
+  }
+
+  function showChecks(list, isZip) {
+    const box = $("checks");
+    box.className = "";
+    box.textContent = "";
+    box.hidden = false;
+    if (isZip) {
+      box.textContent = "ZIP dosyası: içinde index.html olmalı. İçerik derleme sırasında kontrol edilir.";
+      return;
+    }
+    if (!list.length) {
+      box.className = "ok";
+      box.textContent = "Kontrol: sorun görünmüyor.";
+      return;
+    }
+    box.className = "warn";
+    const s = document.createElement("strong");
+    s.textContent = "Kontrol: " + list.length + " uyarı (derlemeyi engellemez)";
+    const ul = document.createElement("ul");
+    list.forEach((m) => {
+      const li = document.createElement("li");
+      li.textContent = m;
+      ul.appendChild(li);
+    });
+    box.appendChild(s);
+    box.appendChild(ul);
+  }
+
+  $("zip").addEventListener("change", async (e) => {
+    const f = e.target.files[0];
+    htmlText = "";
+    $("pickBox").classList.toggle("has-file", !!f);
+    $("previewBtn").hidden = true;
+    $("checks").hidden = true;
+    if (!f) {
+      $("pickText").textContent = "Dosya seçmek için dokun (en fazla 20 MB)";
+      return;
+    }
+    $("pickText").textContent = f.name + " (" + (f.size / 1024 / 1024).toFixed(1) + " MB)";
+    if (/\.zip$/i.test(f.name)) return showChecks([], true);
+    if (/\.html?$/i.test(f.name)) {
+      if (f.size > MAX_CHECK) {
+        const box = $("checks");
+        box.className = "";
+        box.hidden = false;
+        box.textContent = "Dosya büyük olduğu için ön kontrol ve önizleme yapılmadı.";
+        return;
+      }
+      try {
+        htmlText = await readText(f);
+        showChecks(analyzeHtml(htmlText), false);
+        $("previewBtn").hidden = false;
+      } catch (err) {
+        htmlText = "";
+        const box = $("checks");
+        box.className = "warn";
+        box.hidden = false;
+        box.textContent = "Dosya okunamadı, ön kontrol ve önizleme yapılamadı. Derleme yine de çalışır.";
+      }
+    }
+  });
+
+  $("previewBtn").addEventListener("click", () => {
+    if (!htmlText) return;
+    $("pvFrame").srcdoc = htmlText;
+    $("preview").hidden = false;
+  });
+  $("pvClose").addEventListener("click", () => {
+    $("preview").hidden = true;
+    $("pvFrame").srcdoc = "";
+  });
+
+  // ---- Projelerim ----
+  function loadProjects() {
+    try {
+      const l = JSON.parse(lsGet("projects") || "[]");
+      return Array.isArray(l) ? l : [];
+    } catch (e) { return []; }
+  }
+  function storeProjects(list) {
+    list = list.slice(0, 12);
+    if (lsSet("projects", JSON.stringify(list))) return;
+    lsSet("projects", JSON.stringify(list.map((x) => Object.assign({}, x, { icon: "" }))));
+  }
+  async function saveProject(info) {
+    const icon = await makeThumb();
+    const list = loadProjects().filter((x) => x.pkg !== info.pkg);
+    list.unshift({
+      appName: info.appName, pkg: info.pkg, vName: info.vName, vCode: info.vCode,
+      ori: info.ori, splash: info.splash, icon: icon, time: Date.now()
+    });
+    storeProjects(list);
+  }
+  function renderProjects() {
+    const box = $("projList");
+    box.textContent = "";
+    const list = loadProjects();
+    if (!list.length) {
+      const d = document.createElement("div");
+      d.className = "empty";
+      d.textContent = "Henüz proje yok. Bir derleme tamamlandığında burada görünür, tek dokunuşla güncelleyebilirsin.";
+      box.appendChild(d);
+      return;
+    }
+    list.forEach((p, idx) => {
+      const card = document.createElement("section");
+      card.className = "panel proj";
+      const img = document.createElement("img");
+      img.alt = "";
+      img.src = p.icon || DEFAULT_ICON;
+      const info = document.createElement("div");
+      info.className = "info";
+      const n = document.createElement("div");
+      n.className = "name";
+      n.textContent = p.appName;
+      const m = document.createElement("div");
+      m.className = "meta";
+      m.textContent = "v" + p.vName + " (" + p.vCode + ") · " + p.pkg + " · " + new Date(p.time).toLocaleDateString("tr-TR");
+      const acts = document.createElement("div");
+      acts.className = "acts";
+      const up = document.createElement("button");
+      up.type = "button";
+      up.className = "pri";
+      up.textContent = "Güncelle";
+      up.addEventListener("click", () => useProject(p));
+      const del = document.createElement("button");
+      del.type = "button";
+      del.textContent = "Sil";
+      del.addEventListener("click", () => {
+        if (!confirm(p.appName + " listeden silinsin mi? Derlenmiş dosyalar etkilenmez.")) return;
+        const l = loadProjects();
+        l.splice(idx, 1);
+        storeProjects(l);
+        renderProjects();
+      });
+      acts.appendChild(up);
+      acts.appendChild(del);
+      info.appendChild(n);
+      info.appendChild(m);
+      info.appendChild(acts);
+      card.appendChild(img);
+      card.appendChild(info);
+      box.appendChild(card);
+    });
+  }
+  async function useProject(p) {
+    switchTab("build");
+    $("appName").value = p.appName;
+    $("pkg").value = p.pkg;
+    pkgEdited = true;
+    $("vName").value = p.vName;
+    $("vCode").value = String((parseInt(p.vCode, 10) || 0) + 1);
+    $("ori").value = p.ori || "unspecified";
+    selectSwatch(p.splash || "#12161c");
+    $("signMode").value = "own";
+    $("signMode").dispatchEvent(new Event("change"));
+    if (p.icon) {
+      try {
+        const blob = await (await fetch(p.icon)).blob();
+        setIcon(new File([blob], "ikon.png", { type: "image/png" }), "Kayıtlı ikon kullanılıyor");
+      } catch (e) { setIcon(null); }
+    } else {
+      setIcon(null);
+    }
+    $("adv").open = true;
+    const note = $("note");
+    note.textContent = "Güncelleme hazır: sürüm numarası " + $("vCode").value + " yapıldı. Proje dosyasını seç, ilk yayındaki anahtar dosyanı, takma adını ve şifreni gir, sonra Derle'ye bas.";
+    note.hidden = false;
+    window.scrollTo(0, 0);
+  }
+
+  // ---- Yardimcilar ----
+  function log(t) {
+    const time = new Date().toLocaleTimeString("tr-TR");
+    logBox.textContent += time + "  " + t + "\n";
+    logBox.scrollTop = logBox.scrollHeight;
+  }
+  function setMsg(t, cls) {
+    msg.textContent = t;
+    msg.className = cls || "";
+  }
+  function renderSteps(active, mode) {
+    const items = $("steps").children;
+    for (let i = 0; i < items.length; i++) {
+      items[i].dataset.s = mode === "done" ? "done" : i < active ? "done" : i === active ? mode : "wait";
+    }
+  }
+  function fmtTime(ms) {
+    const s = Math.floor(ms / 1000);
+    return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+  }
+  function tick() {
+    $("timer").textContent = "Geçen süre " + fmtTime(Date.now() - t0) + " (genelde 2 ila 4 dakika, sayfayı kapatma)";
+  }
+  function startTimer() {
+    stopTimer();
+    t0 = Date.now();
+    tick();
+    timerId = setInterval(tick, 1000);
+  }
+  function stopTimer(label) {
+    if (timerId) { clearInterval(timerId); timerId = null; }
+    if (label) $("timer").textContent = label + " " + fmtTime(Date.now() - t0);
+  }
+  function showTip(code) {
+    $("tip").textContent = "Ne yapmalı: " + (TIPS[code] || TIPS.unknown);
+    $("tip").hidden = false;
+    $("retryBtn").hidden = false;
+  }
+  function mkErr(code, message) {
+    const e = new Error(message);
+    e.code = code;
+    return e;
+  }
+  $("retryBtn").addEventListener("click", () => $("go").click());
+  function showErr(t, openAdv) {
+    const e = $("formErr");
+    e.textContent = t;
+    e.style.display = "block";
+    if (openAdv) $("adv").open = true;
+    e.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  // ---- Derleme ----
+  $("go").addEventListener("click", async () => {
+    const appName = $("appName").value.trim();
+    const pkg = $("pkg").value.trim();
+    const vName = $("vName").value.trim();
+    const vCode = parseInt($("vCode").value, 10);
+    const ori = $("ori").value;
+    const icon = iconFile;
+    const file = $("zip").files[0];
+    const signMode = $("signMode").value;
+    const ksFile = $("ks").files[0];
+    const alias = $("alias").value.trim();
+    const sPass = $("sPass").value;
+    const kPass = $("kPass").value;
+
+    $("formErr").style.display = "none";
+    $("result").style.display = "none";
+    ["dlApk", "dlAab", "dlKs", "dlKi", "keybox"].forEach((i) => ($(i).style.display = "none"));
+
+    if (!appName) return showErr("Uygulama adını yaz.");
+    if (!file) return showErr("Proje dosyasını seç.");
+    if (!/\.(html?|zip)$/i.test(file.name)) return showErr("Sadece .html veya .zip dosyası seçebilirsin.");
+    if (file.size > MAX_BYTES) return showErr("Dosya en fazla 20 MB olabilir.");
+    if (!pkg) return showErr("Uygulama adında en az bir harf ya da rakam olmalı, ya da Gelişmiş ayarlardan paket adını kendin yaz.", true);
+    if (!/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/.test(pkg))
+      return showErr("Paket adı geçersiz (Türkçe harf, boşluk ve büyük harf olmaz). Örnek: com.ornek.oyunum", true);
+    if (!/^[0-9A-Za-z._-]{1,20}$/.test(vName)) return showErr("Sürüm adı geçersiz. Örnek: 1.0.0", true);
+    if (!Number.isInteger(vCode) || vCode < 1 || vCode > 2100000000)
+      return showErr("Sürüm numarası 1 veya daha büyük bir tam sayı olmalı.", true);
+    if (icon && icon.size > MAX_ICON) return showErr("İkon en fazla 1 MB olabilir.", true);
+    if (icon && !iconOk) return showErr("İkon en az 192x192 piksel olmalı.", true);
+    if (signMode === "own") {
+      if (!ksFile) return showErr("Anahtar dosyasını seç.", true);
+      if (ksFile.size > 200 * 1024) return showErr("Anahtar dosyası çok büyük.", true);
+      if (!alias) return showErr("Anahtar takma adını (alias) yaz.", true);
+      if (!sPass) return showErr("Anahtar dosyası şifresini yaz.", true);
+    }
+    currentMode = signMode;
+
+    $("status").style.display = "block";
+    logBox.textContent = "";
+    $("tip").hidden = true;
+    $("retryBtn").hidden = true;
+    curStep = 0;
+    renderSteps(0, "run");
+    startTimer();
+    setMsg("Dosya yükleniyor");
+    $("status").scrollIntoView({ behavior: "smooth", block: "start" });
+
+    $("go").disabled = true;
+    try {
+      log("Dosya gönderiliyor");
+      const form = new FormData();
+      form.append("zip", file);
+      form.append("appName", appName);
+      form.append("packageName", pkg);
+      form.append("versionName", vName);
+      form.append("versionCode", String(vCode));
+      form.append("orientation", ori);
+      form.append("splashColor", splashColor);
+      if (icon) form.append("icon", icon);
+      form.append("signMode", signMode);
+      if (signMode === "own") {
+        form.append("keystore", ksFile);
+        form.append("alias", alias);
+        form.append("storePassword", sPass);
+        if (kPass) form.append("keyPassword", kPass);
+      }
+      const res = await fetch(WORKER + "/build", { method: "POST", body: form, headers: await authHeaders() });
+      const data = await res.json();
+      if (!res.ok || !data.id) {
+        const ex = new Error(data.error || "Sunucu hatası");
+        if (res.status === 401) ex.code = "auth";
+        throw ex;
+      }
+      log("İş başlatıldı: " + data.id);
+      rememberPkg(appName, pkg);
+      curStep = 1;
+      renderSteps(1, "run");
+      setMsg("");
+      await waitForResult(data.id);
+      renderSteps(5, "done");
+      stopTimer("Toplam süre");
+      setMsg("Hazır. Dosyaları indirebilirsin.", "ok");
+      await showResult(data.id, { appName, vName, vCode, pkg });
+      try {
+        await saveProject({ appName, pkg, vName, vCode, ori, splash: splashColor });
+      } catch (e) {
+        log("Proje kaydedilemedi");
+      }
+    } catch (err) {
+      stopTimer("Süre");
+      renderSteps(curStep, "fail");
+      setMsg("Hata: " + err.message, "bad");
+      log("Hata: " + err.message);
+      if (err.code) showTip(err.code);
+      else if (/fetch|network/i.test(err.message)) showTip("network");
+    } finally {
+      refreshQuota();
+      $("go").disabled = false;
+    }
+  });
+
+  async function waitForResult(id) {
+    const started = Date.now();
+    let lastKey = "";
+    while (Date.now() - started < MAX_WAIT_MS) {
+      await new Promise((r) => setTimeout(r, POLL_MS));
+      let st = "unknown", stg = "", reason = "", code = "";
+      try {
+        const r = await fetch(WORKER + "/status/" + id, { headers: await authHeaders() });
+        const j = await r.json();
+        st = j.status;
+        stg = j.stage || "";
+        reason = j.reason || "";
+        code = j.code || "";
+      } catch (e) {
+        log("Durum alınamadı, tekrar deneniyor");
+        continue;
+      }
+      const key = st + "/" + stg;
+      if (key !== lastKey) {
+        log("Durum: " + st + (stg ? " (" + stg + ")" : ""));
+        lastKey = key;
+      }
+      if (st === "queued" && STAGE_STEP[stg] !== undefined && STAGE_STEP[stg] !== curStep) {
+        curStep = STAGE_STEP[stg];
+        renderSteps(curStep, "run");
+      }
+      if (st === "done") return;
+      if (st === "failed")
+        throw mkErr(code || "unknown", reason || "Derleme başarısız oldu. GitHub Actions sayfasında hata günlüğüne bak.");
+      if (st === "unknown") throw mkErr("expired", "İş bulunamadı, süresi dolmuş olabilir.");
+    }
+    throw mkErr("timeout", "Derleme 15 dakikayı aştı.");
+  }
+
+  async function showResult(id, info) {
+    // Dosyalar dogrudan sunucu adresine baglanir. Boylece hem tarayicida hem
+    // uygulama icinde (WebView) indirme telefonun tarayicisi uzerinden calisir.
+    const items = [["apk", "dlApk"], ["aab", "dlAab"]];
+    if (currentMode === "new") items.push(["keystore", "dlKs"], ["keyinfo", "dlKi"]);
+    for (const [type, elId] of items) {
+      const a = $(elId);
+      a.href = await fileUrl(id, type);
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.style.display = "block";
+    }
+    $("resIcon").src = iconFile && iconUrl ? iconUrl : DEFAULT_ICON;
+    $("resName").textContent = info.appName;
+    $("resMeta").textContent = "v" + info.vName + " (" + info.vCode + ") · " + info.pkg;
+    $("result").style.display = "block";
+    $("result").scrollIntoView({ behavior: "smooth", block: "start" });
+    if (currentMode === "new") {
+      try {
+        const r = await fetch(await fileUrl(id, "keyinfo"));
+        if (r.ok) {
+          $("keyText").textContent = await r.text();
+          $("keybox").style.display = "block";
         }
-    </script>
+      } catch (e) {
+        log("Anahtar bilgisi gösterilemedi, indirme düğmesini kullan.");
+      }
+    }
+  }
+  initAuth();
+</script>
 </body>
 </html>

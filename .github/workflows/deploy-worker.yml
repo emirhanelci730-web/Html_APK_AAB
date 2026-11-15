@@ -1,0 +1,70 @@
+name: Worker yayinla
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/**'
+
+concurrency:
+  group: worker-yayin
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Sozdizimini kontrol et
+        run: |
+          cp worker/index.js "$RUNNER_TEMP/w.mjs"
+          node --check "$RUNNER_TEMP/w.mjs"
+          wc -c worker/index.js
+
+      - name: Cloudflare'a yukle
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CF_TOKEN" ] || [ -z "$CF_ACCOUNT" ]; then
+            echo "HATA: CLOUDFLARE_API_TOKEN veya CLOUDFLARE_ACCOUNT_ID sirri eksik"
+            exit 1
+          fi
+          META='{"main_module":"index.js","compatibility_date":"2025-06-01","keep_bindings":["kv_namespace","d1","plain_text","secret_text"]}'
+          HTTP=$(curl -sS -o resp.json -w '%{http_code}' -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/apk-builder" \
+            -H "Authorization: Bearer $CF_TOKEN" \
+            -F "metadata=${META};type=application/json" \
+            -F "index.js=@worker/index.js;type=application/javascript+module")
+          echo "HTTP $HTTP"
+          jq -r '.errors[]? | "Cloudflare hatasi: " + .message' resp.json || true
+          if [ "$HTTP" != "200" ] || ! jq -e '.success == true' resp.json >/dev/null; then
+            echo "HATA: yukleme basarisiz"
+            exit 1
+          fi
+          echo "Yukleme tamam"
+
+      - name: Saglik kontrolu
+        env:
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+        run: |
+          ok=0
+          for i in 1 2 3 4 5; do
+            sleep 6
+            if curl -sf "$WORKER_URL/me" -o me.json && jq -e '.limit' me.json >/dev/null 2>&1; then
+              ok=1
+              break
+            fi
+            echo "Deneme $i basarisiz, tekrar deneniyor"
+          done
+          if [ "$ok" != "1" ]; then
+            echo "HATA: Worker /me adresine cevap vermiyor"
+            exit 1
+          fi
+          cat me.json

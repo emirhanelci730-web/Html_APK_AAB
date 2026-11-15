@@ -36,6 +36,14 @@ jobs:
             echo "HATA: CLOUDFLARE_API_TOKEN veya CLOUDFLARE_ACCOUNT_ID sirri eksik"
             exit 1
           fi
+          # Hesap kimligi 32 karakterlik harf-rakam kodu olmali
+          if ! echo "$CF_ACCOUNT" | grep -Eq '^[0-9a-f]{32}$'; then
+            echo "HATA: CLOUDFLARE_ACCOUNT_ID gecersiz. 32 karakterlik kucuk harf-rakam kodu olmali, simdiki deger ${#CF_ACCOUNT} karakter ve ${CF_ACCOUNT:0:4} ile basliyor."
+            exit 1
+          fi
+          # Belirtec gecerli mi? (sadece bilgi icin, hata verse de devam eder)
+          curl -sS -H "Authorization: Bearer $CF_TOKEN" https://api.cloudflare.com/client/v4/user/tokens/verify -o verify.json || true
+          echo "Belirtec: ${CF_TOKEN:0:5}... (${#CF_TOKEN} karakter), durum: $(jq -r '.result.status // "dogrulanamadi"' verify.json 2>/dev/null)"
           META='{"main_module":"index.js","compatibility_date":"2025-06-01","keep_bindings":["kv_namespace","d1","plain_text","secret_text"]}'
           HTTP=$(curl -sS -o resp.json -w '%{http_code}' -X PUT \
             "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/apk-builder" \

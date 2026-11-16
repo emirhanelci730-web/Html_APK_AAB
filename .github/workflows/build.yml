@@ -1,3 +1,4 @@
+
 name: Build Android App (.AAB)
 
 on:
@@ -47,6 +48,7 @@ jobs:
       SIGN_MODE: ${{ github.event.inputs.sign_mode }}
       WORKER_URL: ${{ secrets.WORKER_URL }}
       WORKER_SECRET: ${{ secrets.WORKER_SECRET }}
+
     steps:
       - uses: actions/setup-node@v5
         with:
@@ -144,6 +146,7 @@ jobs:
         run: |
           curl -s -m 10 -X POST -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/progress/$JOB_ID?stage=keys" >/dev/null || true
           KS="$RUNNER_TEMP/upload.jks"
+
           if [ "$SIGN_MODE" = "own" ]; then
             curl -sSf -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/sign/$JOB_ID" -o "$RUNNER_TEMP/sign.json"
             curl -sSf -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/ukeystore/$JOB_ID" -o "$KS"
@@ -163,9 +166,24 @@ jobs:
             keytool -genkeypair -storetype PKCS12 -keystore "$KS" \
               -alias "$ALIAS" -keyalg RSA -keysize 2048 -validity 10000 \
               -storepass "$SPASS" -keypass "$SPASS" -dname "CN=Android, C=TR" >/dev/null 2>&1
-            printf 'Uygulama: %s\nPaket adi: %s\nTakma ad (alias): %s\nSifre: %s\n' \
-              "$APP_NAME" "$PACKAGE_NAME" "$ALIAS" "$SPASS" > keyinfo.txt
           fi
+
+          # SHA-1 ve SHA-256 parmak izlerini al
+          FINGERPRINTS=$(keytool -J-Duser.language=en -J-Duser.country=US \
+            -list -v -keystore "$KS" -storepass "$SPASS" -alias "$ALIAS" 2>/dev/null)
+
+          SHA1=$(printf '%s\n' "$FINGERPRINTS" | awk -F': ' '/SHA1:/{print $2; exit}')
+          SHA256=$(printf '%s\n' "$FINGERPRINTS" | awk -F': ' '/SHA256:/{print $2; exit}')
+
+          if [ -z "$SHA1" ] || [ -z "$SHA256" ]; then
+            echo "HATA: SHA-1 veya SHA-256 parmak izi alinamadi"
+            exit 1
+          fi
+
+          # Anahtar bilgileri dosyasini olustur
+          printf 'Uygulama: %s\nPaket adi: %s\nTakma ad (alias): %s\nSHA-1: %s\nSHA-256: %s\n' \
+            "$APP_NAME" "$PACKAGE_NAME" "$ALIAS" "$SHA1" "$SHA256" > keyinfo.txt
+
           echo "ALIAS=$ALIAS" >> "$GITHUB_ENV"
           echo "KS_PASS=$SPASS" >> "$GITHUB_ENV"
           echo "KEY_PASS=$KPASS" >> "$GITHUB_ENV"
@@ -206,14 +224,18 @@ jobs:
       - name: Dosyalari Worker'a gonder
         run: |
           curl -s -m 10 -X POST -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/progress/$JOB_ID?stage=send" >/dev/null || true
+
           if [ "$SIGN_MODE" = "new" ]; then
             curl -sSf -X PUT -H "X-Secret: $WORKER_SECRET" \
               --data-binary @"$RUNNER_TEMP/upload.jks" "$WORKER_URL/result/$JOB_ID?type=keystore"
-            curl -sSf -X PUT -H "X-Secret: $WORKER_SECRET" \
-              --data-binary @keyinfo.txt "$WORKER_URL/result/$JOB_ID?type=keyinfo"
           fi
+
+          curl -sSf -X PUT -H "X-Secret: $WORKER_SECRET" \
+            --data-binary @keyinfo.txt "$WORKER_URL/result/$JOB_ID?type=keyinfo"
+
           curl -sSf -X PUT -H "X-Secret: $WORKER_SECRET" \
             --data-binary @signed-release.apk "$WORKER_URL/result/$JOB_ID?type=apk"
+
           curl -sSf -X PUT -H "X-Secret: $WORKER_SECRET" \
             --data-binary @signed-release.aab "$WORKER_URL/result/$JOB_ID?type=aab"
 

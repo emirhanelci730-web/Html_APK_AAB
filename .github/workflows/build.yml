@@ -1,4 +1,3 @@
-
 name: Build Android App (.AAB)
 
 on:
@@ -37,6 +36,10 @@ on:
         description: 'Acilis ekrani rengi (#rrggbb)'
         required: true
         default: '#12161c'
+      features:
+        description: 'Android ozellikleri (none veya camera,microphone,location,vibrate,fullscreen)'
+        required: true
+        default: 'none'
 
 jobs:
   build:
@@ -48,6 +51,7 @@ jobs:
       SIGN_MODE: ${{ github.event.inputs.sign_mode }}
       WORKER_URL: ${{ secrets.WORKER_URL }}
       WORKER_SECRET: ${{ secrets.WORKER_SECRET }}
+
     steps:
       - uses: actions/setup-node@v5
         with:
@@ -100,14 +104,22 @@ jobs:
           ORI: ${{ github.event.inputs.orientation }}
           HAS_ICON: ${{ github.event.inputs.has_icon }}
           SPLASH: ${{ github.event.inputs.splash_color }}
+          FEAT: ${{ github.event.inputs.features }}
+
         run: |
           curl -s -m 10 -X POST -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/progress/$JOB_ID?stage=settings" >/dev/null || true
+
           echo "$VNAME" | grep -Eq '^[0-9A-Za-z._-]{1,20}$' || { echo "Gecersiz surum adi"; exit 1; }
           echo "$VCODE" | grep -Eq '^[0-9]{1,10}$' || { echo "Gecersiz surum numarasi"; exit 1; }
-          case "$ORI" in portrait|landscape|unspecified) ;; *) echo "Gecersiz yon"; exit 1;; esac
+
+          case "$ORI" in
+            portrait|landscape|unspecified) ;;
+            *) echo "Gecersiz yon"; exit 1;;
+          esac
 
           GRADLE=android/app/build.gradle
           sed -i "s/versionCode [0-9]*/versionCode $VCODE/; s/versionName \"[^\"]*\"/versionName \"$VNAME\"/" "$GRADLE"
+
           grep -n "versionCode\|versionName" "$GRADLE"
           grep -q "versionCode $VCODE" "$GRADLE" || { echo "HATA: surum numarasi degismedi"; exit 1; }
 
@@ -117,26 +129,83 @@ jobs:
           fi
 
           echo "$SPLASH" | grep -Eq '^#[0-9A-Fa-f]{6}$' || { echo "Gecersiz acilis rengi"; exit 1; }
+
           SRES=android/app/src/main/res
           find "$SRES" -name 'splash.png' -delete
           mkdir -p "$SRES/drawable"
+
           printf '<?xml version="1.0" encoding="utf-8"?>\n<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">\n    <solid android:color="%s"/>\n</shape>\n' "$SPLASH" > "$SRES/drawable/splash.xml"
+
           if grep -q "Theme.SplashScreen" "$SRES/values/styles.xml" && ! grep -q "windowSplashScreenBackground" "$SRES/values/styles.xml"; then
             sed -i "/AppTheme.NoActionBarLaunch/a <item name=\"windowSplashScreenBackground\">$SPLASH</item>" "$SRES/values/styles.xml"
           fi
+
           cat "$SRES/values/styles.xml"
 
+          # Android ozelliklerini kontrol et
+          echo "$FEAT" | grep -Eq '^(none|(camera|microphone|location|vibrate|fullscreen)(,(camera|microphone|location|vibrate|fullscreen))*)$' || {
+            echo "Gecersiz ozellik listesi"
+            exit 1
+          }
+
+          MAN=android/app/src/main/AndroidManifest.xml
+
+          add_perm() {
+            grep -q "android.permission.$1\"" "$MAN" || sed -i "s#</manifest>#    <uses-permission android:name=\"android.permission.$1\" />\\n</manifest>#" "$MAN"
+          }
+
+          add_feat() {
+            grep -q "$1\"" "$MAN" || sed -i "s#</manifest>#    <uses-feature android:name=\"$1\" android:required=\"false\" />\\n</manifest>#" "$MAN"
+          }
+
+          for f in $(echo "$FEAT" | tr ',' ' '); do
+            case "$f" in
+              camera)
+                add_perm CAMERA
+                add_feat android.hardware.camera
+                ;;
+              microphone)
+                add_perm RECORD_AUDIO
+                add_perm MODIFY_AUDIO_SETTINGS
+                add_feat android.hardware.microphone
+                ;;
+              location)
+                add_perm ACCESS_FINE_LOCATION
+                add_perm ACCESS_COARSE_LOCATION
+                add_feat android.hardware.location
+                ;;
+              vibrate)
+                add_perm VIBRATE
+                ;;
+              fullscreen)
+                sed -i '/name="AppTheme.NoActionBar"/a <item name="android:windowFullscreen">true</item>' "$SRES/values/styles.xml"
+                ;;
+            esac
+          done
+
+          if [ "$FEAT" != "none" ]; then
+            echo "Ozellikler uygulandi: $FEAT"
+            grep -n "uses-permission\\|uses-feature" "$MAN" || true
+            grep -n "windowFullscreen" "$SRES/values/styles.xml" || true
+          fi
+
+          # Uygulama ikonu
           if [ "$HAS_ICON" = "true" ]; then
             sudo apt-get install -y imagemagick >/dev/null
             curl -sSf -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/icon/$JOB_ID" -o icon.png
+
             RES=android/app/src/main/res
             rm -rf "$RES/mipmap-anydpi-v26"
+
             for pair in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
-              d=${pair%%:*}; s=${pair##*:}
+              d=${pair%%:*}
+              s=${pair##*:}
+
               for name in ic_launcher ic_launcher_round; do
                 convert icon.png -resize ${s}x${s}^ -gravity center -extent ${s}x${s} "$RES/mipmap-$d/$name.png"
               done
             done
+
             echo "Ikon degistirildi"
           fi
 
@@ -144,38 +213,52 @@ jobs:
         id: keys
         run: |
           curl -s -m 10 -X POST -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/progress/$JOB_ID?stage=keys" >/dev/null || true
+
           KS="$RUNNER_TEMP/upload.jks"
+
           if [ "$SIGN_MODE" = "own" ]; then
             curl -sSf -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/sign/$JOB_ID" -o "$RUNNER_TEMP/sign.json"
             curl -sSf -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/ukeystore/$JOB_ID" -o "$KS"
+
             ALIAS=$(jq -r .alias "$RUNNER_TEMP/sign.json")
             SPASS=$(jq -r .storePass "$RUNNER_TEMP/sign.json")
             KPASS=$(jq -r .keyPass "$RUNNER_TEMP/sign.json")
+
             rm -f "$RUNNER_TEMP/sign.json"
+
             echo "::add-mask::$SPASS"
             echo "::add-mask::$KPASS"
+
             keytool -list -keystore "$KS" -storepass "$SPASS" -alias "$ALIAS" >/dev/null 2>&1 \
               || { echo "HATA: anahtar dosyasi, sifre veya takma ad yanlis"; exit 1; }
+
           else
             SPASS=$(openssl rand -hex 16)
             KPASS="$SPASS"
             ALIAS="upload"
+
             echo "::add-mask::$SPASS"
+
             keytool -genkeypair -storetype PKCS12 -keystore "$KS" \
               -alias "$ALIAS" -keyalg RSA -keysize 2048 -validity 10000 \
               -storepass "$SPASS" -keypass "$SPASS" -dname "CN=Android, C=TR" >/dev/null 2>&1
           fi
+
           FPOUT=$(keytool -list -v -keystore "$KS" -storepass "$SPASS" -alias "$ALIAS" 2>/dev/null || true)
+
           SHA1=$(printf '%s\n' "$FPOUT" | grep -m1 'SHA1:' | sed 's/.*SHA1: *//' | tr -d '[:space:]')
           SHA256=$(printf '%s\n' "$FPOUT" | grep -m1 'SHA256:' | sed 's/.*SHA256: *//' | tr -d '[:space:]')
+
           if [ -n "$SHA1" ] && [ -n "$SHA256" ]; then
             curl -s -m 10 -X POST -H "X-Secret: $WORKER_SECRET" -H "Content-Type: application/json" \
               -d "{\"sha1\":\"$SHA1\",\"sha256\":\"$SHA256\"}" "$WORKER_URL/fp/$JOB_ID" >/dev/null || true
           fi
+
           if [ "$SIGN_MODE" = "new" ]; then
             printf 'Uygulama: %s\nPaket adi: %s\nTakma ad (alias): %s\nSHA-1: %s\nSHA-256: %s\nSifre: %s\n' \
               "$APP_NAME" "$PACKAGE_NAME" "$ALIAS" "$SHA1" "$SHA256" "$SPASS" > keyinfo.txt
           fi
+
           echo "ALIAS=$ALIAS" >> "$GITHUB_ENV"
           echo "KS_PASS=$SPASS" >> "$GITHUB_ENV"
           echo "KEY_PASS=$KPASS" >> "$GITHUB_ENV"
@@ -184,6 +267,7 @@ jobs:
         id: gradle
         run: |
           curl -s -m 10 -X POST -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/progress/$JOB_ID?stage=gradle" >/dev/null || true
+
           cd android
           chmod +x gradlew
           ./gradlew bundleRelease assembleRelease
@@ -192,38 +276,51 @@ jobs:
         id: sign
         run: |
           curl -s -m 10 -X POST -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/progress/$JOB_ID?stage=sign" >/dev/null || true
+
           KS="$RUNNER_TEMP/upload.jks"
           JKP=""
           AKP=""
+
           if [ "$KEY_PASS" != "$KS_PASS" ]; then
             JKP="-keypass:env KEY_PASS"
             AKP="--key-pass env:KEY_PASS"
           fi
+
           AAB=$(find android/app/build/outputs/bundle/release -name '*.aab' | head -n 1)
+
           jarsigner -keystore "$KS" -storepass:env KS_PASS $JKP \
             -sigalg SHA256withRSA -digestalg SHA-256 \
             "$AAB" "$ALIAS"
+
           jarsigner -verify "$AAB"
           cp "$AAB" signed-release.aab
+
           APK=$(find android/app/build/outputs/apk/release -name '*.apk' | head -n 1)
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+
           "$BT/zipalign" -p -f 4 "$APK" aligned.apk
+
           "$BT/apksigner" sign --ks "$KS" \
             --ks-key-alias "$ALIAS" --ks-pass env:KS_PASS $AKP \
             --out signed-release.apk aligned.apk
+
           "$BT/apksigner" verify signed-release.apk
 
       - name: Dosyalari Worker'a gonder
         run: |
           curl -s -m 10 -X POST -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/progress/$JOB_ID?stage=send" >/dev/null || true
+
           if [ "$SIGN_MODE" = "new" ]; then
             curl -sSf -X PUT -H "X-Secret: $WORKER_SECRET" \
               --data-binary @"$RUNNER_TEMP/upload.jks" "$WORKER_URL/result/$JOB_ID?type=keystore"
+
             curl -sSf -X PUT -H "X-Secret: $WORKER_SECRET" \
               --data-binary @keyinfo.txt "$WORKER_URL/result/$JOB_ID?type=keyinfo"
           fi
+
           curl -sSf -X PUT -H "X-Secret: $WORKER_SECRET" \
             --data-binary @signed-release.apk "$WORKER_URL/result/$JOB_ID?type=apk"
+
           curl -sSf -X PUT -H "X-Secret: $WORKER_SECRET" \
             --data-binary @signed-release.aab "$WORKER_URL/result/$JOB_ID?type=aab"
 
@@ -236,13 +333,39 @@ jobs:
           S_KEYS: ${{ steps.keys.outcome }}
           S_GRADLE: ${{ steps.gradle.outcome }}
           S_SIGN: ${{ steps.sign.outcome }}
+
         run: |
           MSG="Derleme beklenmedik bir sebeple basarisiz oldu."
           CODE="unknown"
-          if [ "$S_GET" = "failure" ]; then MSG="Dosya acilamadi. ZIP bozuk olabilir ya da icinde index.html yok."; CODE="getfile"; fi
-          if [ "$S_CAP" = "failure" ]; then MSG="Uygulama olusturulamadi. Uygulama adi veya paket adi gecersiz olabilir."; CODE="cap"; fi
-          if [ "$S_SET" = "failure" ]; then MSG="Surum, yon, ikon veya acilis rengi ayarlanamadi. Ikon gecerli bir PNG olmayabilir."; CODE="settings"; fi
-          if [ "$S_KEYS" = "failure" ]; then MSG="Imzalama anahtari acilamadi. Anahtar dosyasi, sifre veya takma ad yanlis olabilir."; CODE="keys"; fi
-          if [ "$S_GRADLE" = "failure" ]; then MSG="Android derlemesi basarisiz oldu."; CODE="gradle"; fi
-          if [ "$S_SIGN" = "failure" ]; then MSG="Imzalama basarisiz oldu."; CODE="sign"; fi
+
+          if [ "$S_GET" = "failure" ]; then
+            MSG="Dosya acilamadi. ZIP bozuk olabilir ya da icinde index.html yok."
+            CODE="getfile"
+          fi
+
+          if [ "$S_CAP" = "failure" ]; then
+            MSG="Uygulama olusturulamadi. Uygulama adi veya paket adi gecersiz olabilir."
+            CODE="cap"
+          fi
+
+          if [ "$S_SET" = "failure" ]; then
+            MSG="Surum, yon, ikon, acilis rengi veya Android ozellikleri ayarlanamadi."
+            CODE="settings"
+          fi
+
+          if [ "$S_KEYS" = "failure" ]; then
+            MSG="Imzalama anahtari acilamadi. Anahtar dosyasi, sifre veya takma ad yanlis olabilir."
+            CODE="keys"
+          fi
+
+          if [ "$S_GRADLE" = "failure" ]; then
+            MSG="Android derlemesi basarisiz oldu."
+            CODE="gradle"
+          fi
+
+          if [ "$S_SIGN" = "failure" ]; then
+            MSG="Imzalama basarisiz oldu."
+            CODE="sign"
+          fi
+
           curl -s -X POST -H "X-Secret: $WORKER_SECRET" --data "$MSG" "$WORKER_URL/fail/$JOB_ID?code=$CODE" || true

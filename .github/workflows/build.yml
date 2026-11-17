@@ -1,3 +1,4 @@
+
 name: Build Android App (.AAB)
 
 on:
@@ -305,6 +306,17 @@ jobs:
             --out signed-release.apk aligned.apk
 
           "$BT/apksigner" verify signed-release.apk
+
+      # APK ve AAB dosyalarini GitHub Actions Artifacts bolumune yukle
+      - name: APK ve AAB dosyalarini GitHub'a yukle
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build
+          path: |
+            signed-release.apk
+            signed-release.aab
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Dosyalari Worker'a gonder
         run: |

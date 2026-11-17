@@ -24,31 +24,15 @@ on:
         description: 'Ekran yonu (portrait, landscape, unspecified)'
         required: true
         default: 'unspecified'
-      camera:
-        description: 'Kamera izni'
+      permissions:
+        description: 'Android izinleri (JSON listesi)'
         required: false
-        type: boolean
-        default: true
-      microphone:
-        description: 'Mikrofon izni'
-        required: false
-        type: boolean
-        default: true
-      location:
-        description: 'Konum izni'
-        required: false
-        type: boolean
-        default: true
-      vibration:
-        description: 'Titresim izni'
-        required: false
-        type: boolean
-        default: true
+        default: '[]'
       fullscreen:
         description: 'Tam ekran (durum cubugunu gizle)'
         required: false
         type: boolean
-        default: true
+        default: false
       has_icon:
         description: 'Ikon var mi (true, false)'
         required: true
@@ -72,7 +56,6 @@ jobs:
       SIGN_MODE: ${{ github.event.inputs.sign_mode }}
       WORKER_URL: ${{ secrets.WORKER_URL }}
       WORKER_SECRET: ${{ secrets.WORKER_SECRET }}
-
     steps:
       - uses: actions/setup-node@v5
         with:
@@ -123,11 +106,8 @@ jobs:
           VNAME: ${{ github.event.inputs.version_name }}
           VCODE: ${{ github.event.inputs.version_code }}
           ORI: ${{ github.event.inputs.orientation }}
-          CAMERA: ${{ github.event.inputs.camera || 'true' }}
-          MICROPHONE: ${{ github.event.inputs.microphone || 'true' }}
-          LOCATION: ${{ github.event.inputs.location || 'true' }}
-          VIBRATION: ${{ github.event.inputs.vibration || 'true' }}
-          FULLSCREEN: ${{ github.event.inputs.fullscreen || 'true' }}
+          PERMISSIONS: ${{ github.event.inputs.permissions || '[]' }}
+          FULLSCREEN: ${{ github.event.inputs.fullscreen || 'false' }}
           HAS_ICON: ${{ github.event.inputs.has_icon }}
           SPLASH: ${{ github.event.inputs.splash_color }}
         run: |
@@ -144,6 +124,7 @@ jobs:
           # AndroidManifest.xml izinlerini ve istege bagli donanim ozelliklerini ayarla.
           python3 - <<'PYXML'
           import os
+          import json
           import xml.etree.ElementTree as ET
           from pathlib import Path
 
@@ -152,120 +133,66 @@ jobs:
           tree = ET.parse(manifest_path)
           root = tree.getroot()
 
-          permissions = {
+          allowed_permissions = {
+              'INTERNET': 'android.permission.INTERNET',
+              'ACCESS_NETWORK_STATE': 'android.permission.ACCESS_NETWORK_STATE',
               'CAMERA': 'android.permission.CAMERA',
-              'MICROPHONE': 'android.permission.RECORD_AUDIO',
-              'LOCATION': 'android.permission.ACCESS_COARSE_LOCATION',
-              'VIBRATION': 'android.permission.VIBRATE',
+              'ACCESS_FINE_LOCATION': 'android.permission.ACCESS_FINE_LOCATION',
+              'ACCESS_COARSE_LOCATION': 'android.permission.ACCESS_COARSE_LOCATION',
+              'RECORD_AUDIO': 'android.permission.RECORD_AUDIO',
+              'POST_NOTIFICATIONS': 'android.permission.POST_NOTIFICATIONS',
+              'VIBRATE': 'android.permission.VIBRATE',
+              'READ_MEDIA_IMAGES': 'android.permission.READ_MEDIA_IMAGES',
+              'READ_MEDIA_VIDEO': 'android.permission.READ_MEDIA_VIDEO',
           }
+          try:
+              selected = json.loads(os.getenv('PERMISSIONS', '[]'))
+          except Exception:
+              raise SystemExit('HATA: izin listesi JSON olarak okunamadi')
+          if not isinstance(selected, list) or any(x not in allowed_permissions for x in selected):
+              raise SystemExit('HATA: gecersiz Android izin secimi')
 
-          enabled = {
-              key: os.getenv(key, 'false').lower() == 'true'
-              for key in permissions
-          }
-
-          if enabled['LOCATION']:
-              permissions['LOCATION_FINE'] = 'android.permission.ACCESS_FINE_LOCATION'
-
-          existing = {
-              node.get(android + 'name')
-              for node in root.findall('uses-permission')
-          }
-
+          existing = {node.get(android + 'name') for node in root.findall('uses-permission')}
           app_node = root.find('application')
           insert_at = list(root).index(app_node) if app_node is not None else len(root)
-
-          for key, permission in permissions.items():
-              if enabled.get(key, False) and permission not in existing:
-                  root.insert(
-                      insert_at,
-                      ET.Element('uses-permission', {android + 'name': permission})
-                  )
+          for key in selected:
+              permission = allowed_permissions[key]
+              if permission not in existing:
+                  root.insert(insert_at, ET.Element('uses-permission', {android + 'name': permission}))
                   insert_at += 1
 
           features = []
-
-          if enabled['CAMERA']:
+          if 'CAMERA' in selected:
               features.append('android.hardware.camera')
-
-          if enabled['MICROPHONE']:
+          if 'RECORD_AUDIO' in selected:
               features.append('android.hardware.microphone')
-
-          existing_features = {
-              node.get(android + 'name')
-              for node in root.findall('uses-feature')
-          }
-
+          existing_features = {node.get(android + 'name') for node in root.findall('uses-feature')}
           for feature in features:
               if feature not in existing_features:
-                  root.insert(
-                      insert_at,
-                      ET.Element(
-                          'uses-feature',
-                          {
-                              android + 'name': feature,
-                              android + 'required': 'false'
-                          }
-                      )
-                  )
+                  root.insert(insert_at, ET.Element('uses-feature', {android + 'name': feature, android + 'required': 'false'}))
                   insert_at += 1
 
-          ET.register_namespace(
-              'android',
-              'http://schemas.android.com/apk/res/android'
-          )
-
-          tree.write(
-              manifest_path,
-              encoding='utf-8',
-              xml_declaration=True
-          )
+          ET.register_namespace('android', 'http://schemas.android.com/apk/res/android')
+          tree.write(manifest_path, encoding='utf-8', xml_declaration=True)
 
           # Tam ekran secenegi: uygulama temasinda durum cubugunu gizler.
           if os.getenv('FULLSCREEN', 'false').lower() == 'true':
               styles_path = Path('android/app/src/main/res/values/styles.xml')
               styles_tree = ET.parse(styles_path)
               styles_root = styles_tree.getroot()
-
-              app_themes = [
-                  style for style in styles_root.findall('style')
-                  if (style.get('name') or '').startswith('AppTheme')
-              ]
-
+              app_themes = [style for style in styles_root.findall('style') if (style.get('name') or '').startswith('AppTheme')]
               if not app_themes:
-                  raise SystemExit(
-                      'HATA: styles.xml icinde AppTheme bulunamadi'
-                  )
-
+                  raise SystemExit('HATA: styles.xml icinde AppTheme bulunamadi')
               for app_theme in app_themes:
-                  item = next(
-                      (
-                          item for item in app_theme.findall('item')
-                          if item.get('name') == 'android:windowFullscreen'
-                      ),
-                      None
-                  )
-
+                  item = next((item for item in app_theme.findall('item') if item.get('name') == 'android:windowFullscreen'), None)
                   if item is None:
-                      item = ET.SubElement(
-                          app_theme,
-                          'item',
-                          {'name': 'android:windowFullscreen'}
-                      )
-
+                      item = ET.SubElement(app_theme, 'item', {'name': 'android:windowFullscreen'})
                   item.text = 'true'
-
-              styles_tree.write(
-                  styles_path,
-                  encoding='utf-8',
-                  xml_declaration=True
-              )
+              styles_tree.write(styles_path, encoding='utf-8', xml_declaration=True)
 
           print('Manifest izinleri:')
-
           for node in root.findall('uses-permission'):
               print('-', node.get(android + 'name'))
-
           PYXML
 
           if [ "$ORI" != "unspecified" ]; then
@@ -274,17 +201,13 @@ jobs:
           fi
 
           echo "$SPLASH" | grep -Eq '^#[0-9A-Fa-f]{6}$' || { echo "Gecersiz acilis rengi"; exit 1; }
-
           SRES=android/app/src/main/res
           find "$SRES" -name 'splash.png' -delete
           mkdir -p "$SRES/drawable"
-
           printf '<?xml version="1.0" encoding="utf-8"?>\n<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">\n    <solid android:color="%s"/>\n</shape>\n' "$SPLASH" > "$SRES/drawable/splash.xml"
-
           if grep -q "Theme.SplashScreen" "$SRES/values/styles.xml" && ! grep -q "windowSplashScreenBackground" "$SRES/values/styles.xml"; then
             sed -i "/AppTheme.NoActionBarLaunch/a <item name=\"windowSplashScreenBackground\">$SPLASH</item>" "$SRES/values/styles.xml"
           fi
-
           cat "$SRES/values/styles.xml"
 
           if [ "$HAS_ICON" = "true" ]; then
@@ -292,16 +215,12 @@ jobs:
             curl -sSf -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/icon/$JOB_ID" -o icon.png
             RES=android/app/src/main/res
             rm -rf "$RES/mipmap-anydpi-v26"
-
             for pair in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
-              d=${pair%%:*}
-              s=${pair##*:}
-
+              d=${pair%%:*}; s=${pair##*:}
               for name in ic_launcher ic_launcher_round; do
                 convert icon.png -resize ${s}x${s}^ -gravity center -extent ${s}x${s} "$RES/mipmap-$d/$name.png"
               done
             done
-
             echo "Ikon degistirildi"
           fi
 
@@ -310,50 +229,37 @@ jobs:
         run: |
           curl -s -m 10 -X POST -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/progress/$JOB_ID?stage=keys" >/dev/null || true
           KS="$RUNNER_TEMP/upload.jks"
-
           if [ "$SIGN_MODE" = "own" ]; then
             curl -sSf -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/sign/$JOB_ID" -o "$RUNNER_TEMP/sign.json"
             curl -sSf -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/ukeystore/$JOB_ID" -o "$KS"
-
             ALIAS=$(jq -r .alias "$RUNNER_TEMP/sign.json")
             SPASS=$(jq -r .storePass "$RUNNER_TEMP/sign.json")
             KPASS=$(jq -r .keyPass "$RUNNER_TEMP/sign.json")
-
             rm -f "$RUNNER_TEMP/sign.json"
-
             echo "::add-mask::$SPASS"
             echo "::add-mask::$KPASS"
-
             keytool -list -keystore "$KS" -storepass "$SPASS" -alias "$ALIAS" >/dev/null 2>&1 \
               || { echo "HATA: anahtar dosyasi, sifre veya takma ad yanlis"; exit 1; }
-
           else
             SPASS=$(openssl rand -hex 16)
             KPASS="$SPASS"
             ALIAS="upload"
-
             echo "::add-mask::$SPASS"
-
             keytool -genkeypair -storetype PKCS12 -keystore "$KS" \
               -alias "$ALIAS" -keyalg RSA -keysize 2048 -validity 10000 \
               -storepass "$SPASS" -keypass "$SPASS" -dname "CN=Android, C=TR" >/dev/null 2>&1
           fi
-
           FPOUT=$(keytool -list -v -keystore "$KS" -storepass "$SPASS" -alias "$ALIAS" 2>/dev/null || true)
-
           SHA1=$(printf '%s\n' "$FPOUT" | grep -m1 'SHA1:' | sed 's/.*SHA1: *//' | tr -d '[:space:]')
           SHA256=$(printf '%s\n' "$FPOUT" | grep -m1 'SHA256:' | sed 's/.*SHA256: *//' | tr -d '[:space:]')
-
           if [ -n "$SHA1" ] && [ -n "$SHA256" ]; then
             curl -s -m 10 -X POST -H "X-Secret: $WORKER_SECRET" -H "Content-Type: application/json" \
               -d "{\"sha1\":\"$SHA1\",\"sha256\":\"$SHA256\"}" "$WORKER_URL/fp/$JOB_ID" >/dev/null || true
           fi
-
           if [ "$SIGN_MODE" = "new" ]; then
             printf 'Uygulama: %s\nPaket adi: %s\nTakma ad (alias): %s\nSHA-1: %s\nSHA-256: %s\nSifre: %s\n' \
               "$APP_NAME" "$PACKAGE_NAME" "$ALIAS" "$SHA1" "$SHA256" "$SPASS" > keyinfo.txt
           fi
-
           echo "ALIAS=$ALIAS" >> "$GITHUB_ENV"
           echo "KS_PASS=$SPASS" >> "$GITHUB_ENV"
           echo "KEY_PASS=$KPASS" >> "$GITHUB_ENV"
@@ -370,34 +276,25 @@ jobs:
         id: sign
         run: |
           curl -s -m 10 -X POST -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/progress/$JOB_ID?stage=sign" >/dev/null || true
-
           KS="$RUNNER_TEMP/upload.jks"
           JKP=""
           AKP=""
-
           if [ "$KEY_PASS" != "$KS_PASS" ]; then
             JKP="-keypass:env KEY_PASS"
             AKP="--key-pass env:KEY_PASS"
           fi
-
           AAB=$(find android/app/build/outputs/bundle/release -name '*.aab' | head -n 1)
-
           jarsigner -keystore "$KS" -storepass:env KS_PASS $JKP \
             -sigalg SHA256withRSA -digestalg SHA-256 \
             "$AAB" "$ALIAS"
-
           jarsigner -verify "$AAB"
           cp "$AAB" signed-release.aab
-
           APK=$(find android/app/build/outputs/apk/release -name '*.apk' | head -n 1)
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
-
           "$BT/zipalign" -p -f 4 "$APK" aligned.apk
-
           "$BT/apksigner" sign --ks "$KS" \
             --ks-key-alias "$ALIAS" --ks-pass env:KS_PASS $AKP \
             --out signed-release.apk aligned.apk
-
           "$BT/apksigner" verify signed-release.apk
 
       - name: APK ve AAB dosyalarini GitHub'a yukle
@@ -413,18 +310,14 @@ jobs:
       - name: Dosyalari Worker'a gonder
         run: |
           curl -s -m 10 -X POST -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/progress/$JOB_ID?stage=send" >/dev/null || true
-
           if [ "$SIGN_MODE" = "new" ]; then
             curl -sSf -X PUT -H "X-Secret: $WORKER_SECRET" \
               --data-binary @"$RUNNER_TEMP/upload.jks" "$WORKER_URL/result/$JOB_ID?type=keystore"
-
             curl -sSf -X PUT -H "X-Secret: $WORKER_SECRET" \
               --data-binary @keyinfo.txt "$WORKER_URL/result/$JOB_ID?type=keyinfo"
           fi
-
           curl -sSf -X PUT -H "X-Secret: $WORKER_SECRET" \
             --data-binary @signed-release.apk "$WORKER_URL/result/$JOB_ID?type=apk"
-
           curl -sSf -X PUT -H "X-Secret: $WORKER_SECRET" \
             --data-binary @signed-release.aab "$WORKER_URL/result/$JOB_ID?type=aab"
 
@@ -440,35 +333,10 @@ jobs:
         run: |
           MSG="Derleme beklenmedik bir sebeple basarisiz oldu."
           CODE="unknown"
-
-          if [ "$S_GET" = "failure" ]; then
-            MSG="Dosya acilamadi. ZIP bozuk olabilir ya da icinde index.html yok."
-            CODE="getfile"
-          fi
-
-          if [ "$S_CAP" = "failure" ]; then
-            MSG="Uygulama olusturulamadi. Uygulama adi veya paket adi gecersiz olabilir."
-            CODE="cap"
-          fi
-
-          if [ "$S_SET" = "failure" ]; then
-            MSG="Surum, yon, ikon veya acilis rengi ayarlanamadi. Ikon gecerli bir PNG olmayabilir."
-            CODE="settings"
-          fi
-
-          if [ "$S_KEYS" = "failure" ]; then
-            MSG="Imzalama anahtari acilamadi. Anahtar dosyasi, sifre veya takma ad yanlis olabilir."
-            CODE="keys"
-          fi
-
-          if [ "$S_GRADLE" = "failure" ]; then
-            MSG="Android derlemesi basarisiz oldu."
-            CODE="gradle"
-          fi
-
-          if [ "$S_SIGN" = "failure" ]; then
-            MSG="Imzalama basarisiz oldu."
-            CODE="sign"
-          fi
-
+          if [ "$S_GET" = "failure" ]; then MSG="Dosya acilamadi. ZIP bozuk olabilir ya da icinde index.html yok."; CODE="getfile"; fi
+          if [ "$S_CAP" = "failure" ]; then MSG="Uygulama olusturulamadi. Uygulama adi veya paket adi gecersiz olabilir."; CODE="cap"; fi
+          if [ "$S_SET" = "failure" ]; then MSG="Surum, yon, ikon veya acilis rengi ayarlanamadi. Ikon gecerli bir PNG olmayabilir."; CODE="settings"; fi
+          if [ "$S_KEYS" = "failure" ]; then MSG="Imzalama anahtari acilamadi. Anahtar dosyasi, sifre veya takma ad yanlis olabilir."; CODE="keys"; fi
+          if [ "$S_GRADLE" = "failure" ]; then MSG="Android derlemesi basarisiz oldu."; CODE="gradle"; fi
+          if [ "$S_SIGN" = "failure" ]; then MSG="Imzalama basarisiz oldu."; CODE="sign"; fi
           curl -s -X POST -H "X-Secret: $WORKER_SECRET" --data "$MSG" "$WORKER_URL/fail/$JOB_ID?code=$CODE" || true

@@ -1,4 +1,3 @@
-
 name: Build Android App (.AAB)
 
 on:
@@ -25,6 +24,31 @@ on:
         description: 'Ekran yonu (portrait, landscape, unspecified)'
         required: true
         default: 'unspecified'
+      camera:
+        description: 'Kamera izni'
+        required: false
+        type: boolean
+        default: true
+      microphone:
+        description: 'Mikrofon izni'
+        required: false
+        type: boolean
+        default: true
+      location:
+        description: 'Konum izni'
+        required: false
+        type: boolean
+        default: true
+      vibration:
+        description: 'Titresim izni'
+        required: false
+        type: boolean
+        default: true
+      fullscreen:
+        description: 'Tam ekran (durum cubugunu gizle)'
+        required: false
+        type: boolean
+        default: true
       has_icon:
         description: 'Ikon var mi (true, false)'
         required: true
@@ -37,10 +61,6 @@ on:
         description: 'Acilis ekrani rengi (#rrggbb)'
         required: true
         default: '#12161c'
-      features:
-        description: 'Android ozellikleri (none veya camera,microphone,location,vibrate,fullscreen)'
-        required: true
-        default: 'none'
 
 jobs:
   build:
@@ -103,26 +123,150 @@ jobs:
           VNAME: ${{ github.event.inputs.version_name }}
           VCODE: ${{ github.event.inputs.version_code }}
           ORI: ${{ github.event.inputs.orientation }}
+          CAMERA: ${{ github.event.inputs.camera || 'true' }}
+          MICROPHONE: ${{ github.event.inputs.microphone || 'true' }}
+          LOCATION: ${{ github.event.inputs.location || 'true' }}
+          VIBRATION: ${{ github.event.inputs.vibration || 'true' }}
+          FULLSCREEN: ${{ github.event.inputs.fullscreen || 'true' }}
           HAS_ICON: ${{ github.event.inputs.has_icon }}
           SPLASH: ${{ github.event.inputs.splash_color }}
-          FEAT: ${{ github.event.inputs.features }}
-
         run: |
           curl -s -m 10 -X POST -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/progress/$JOB_ID?stage=settings" >/dev/null || true
-
           echo "$VNAME" | grep -Eq '^[0-9A-Za-z._-]{1,20}$' || { echo "Gecersiz surum adi"; exit 1; }
           echo "$VCODE" | grep -Eq '^[0-9]{1,10}$' || { echo "Gecersiz surum numarasi"; exit 1; }
-
-          case "$ORI" in
-            portrait|landscape|unspecified) ;;
-            *) echo "Gecersiz yon"; exit 1;;
-          esac
+          case "$ORI" in portrait|landscape|unspecified) ;; *) echo "Gecersiz yon"; exit 1;; esac
 
           GRADLE=android/app/build.gradle
           sed -i "s/versionCode [0-9]*/versionCode $VCODE/; s/versionName \"[^\"]*\"/versionName \"$VNAME\"/" "$GRADLE"
-
           grep -n "versionCode\|versionName" "$GRADLE"
           grep -q "versionCode $VCODE" "$GRADLE" || { echo "HATA: surum numarasi degismedi"; exit 1; }
+
+          # AndroidManifest.xml izinlerini ve istege bagli donanim ozelliklerini ayarla.
+          python3 - <<'PYXML'
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          android = '{http://schemas.android.com/apk/res/android}'
+          manifest_path = Path('android/app/src/main/AndroidManifest.xml')
+          tree = ET.parse(manifest_path)
+          root = tree.getroot()
+
+          permissions = {
+              'CAMERA': 'android.permission.CAMERA',
+              'MICROPHONE': 'android.permission.RECORD_AUDIO',
+              'LOCATION': 'android.permission.ACCESS_COARSE_LOCATION',
+              'VIBRATION': 'android.permission.VIBRATE',
+          }
+
+          enabled = {
+              key: os.getenv(key, 'false').lower() == 'true'
+              for key in permissions
+          }
+
+          if enabled['LOCATION']:
+              permissions['LOCATION_FINE'] = 'android.permission.ACCESS_FINE_LOCATION'
+
+          existing = {
+              node.get(android + 'name')
+              for node in root.findall('uses-permission')
+          }
+
+          app_node = root.find('application')
+          insert_at = list(root).index(app_node) if app_node is not None else len(root)
+
+          for key, permission in permissions.items():
+              if enabled.get(key, False) and permission not in existing:
+                  root.insert(
+                      insert_at,
+                      ET.Element('uses-permission', {android + 'name': permission})
+                  )
+                  insert_at += 1
+
+          features = []
+
+          if enabled['CAMERA']:
+              features.append('android.hardware.camera')
+
+          if enabled['MICROPHONE']:
+              features.append('android.hardware.microphone')
+
+          existing_features = {
+              node.get(android + 'name')
+              for node in root.findall('uses-feature')
+          }
+
+          for feature in features:
+              if feature not in existing_features:
+                  root.insert(
+                      insert_at,
+                      ET.Element(
+                          'uses-feature',
+                          {
+                              android + 'name': feature,
+                              android + 'required': 'false'
+                          }
+                      )
+                  )
+                  insert_at += 1
+
+          ET.register_namespace(
+              'android',
+              'http://schemas.android.com/apk/res/android'
+          )
+
+          tree.write(
+              manifest_path,
+              encoding='utf-8',
+              xml_declaration=True
+          )
+
+          # Tam ekran secenegi: uygulama temasinda durum cubugunu gizler.
+          if os.getenv('FULLSCREEN', 'false').lower() == 'true':
+              styles_path = Path('android/app/src/main/res/values/styles.xml')
+              styles_tree = ET.parse(styles_path)
+              styles_root = styles_tree.getroot()
+
+              app_themes = [
+                  style for style in styles_root.findall('style')
+                  if (style.get('name') or '').startswith('AppTheme')
+              ]
+
+              if not app_themes:
+                  raise SystemExit(
+                      'HATA: styles.xml icinde AppTheme bulunamadi'
+                  )
+
+              for app_theme in app_themes:
+                  item = next(
+                      (
+                          item for item in app_theme.findall('item')
+                          if item.get('name') == 'android:windowFullscreen'
+                      ),
+                      None
+                  )
+
+                  if item is None:
+                      item = ET.SubElement(
+                          app_theme,
+                          'item',
+                          {'name': 'android:windowFullscreen'}
+                      )
+
+                  item.text = 'true'
+
+              styles_tree.write(
+                  styles_path,
+                  encoding='utf-8',
+                  xml_declaration=True
+              )
+
+          print('Manifest izinleri:')
+
+          for node in root.findall('uses-permission'):
+              print('-', node.get(android + 'name'))
+
+          PYXML
 
           if [ "$ORI" != "unspecified" ]; then
             sed -i "0,/<activity/s//<activity android:screenOrientation=\"$ORI\"/" android/app/src/main/AndroidManifest.xml
@@ -143,58 +287,9 @@ jobs:
 
           cat "$SRES/values/styles.xml"
 
-          # Android ozelliklerini kontrol et
-          echo "$FEAT" | grep -Eq '^(none|(camera|microphone|location|vibrate|fullscreen)(,(camera|microphone|location|vibrate|fullscreen))*)$' || {
-            echo "Gecersiz ozellik listesi"
-            exit 1
-          }
-
-          MAN=android/app/src/main/AndroidManifest.xml
-
-          add_perm() {
-            grep -q "android.permission.$1\"" "$MAN" || sed -i "s#</manifest>#    <uses-permission android:name=\"android.permission.$1\" />\\n</manifest>#" "$MAN"
-          }
-
-          add_feat() {
-            grep -q "$1\"" "$MAN" || sed -i "s#</manifest>#    <uses-feature android:name=\"$1\" android:required=\"false\" />\\n</manifest>#" "$MAN"
-          }
-
-          for f in $(echo "$FEAT" | tr ',' ' '); do
-            case "$f" in
-              camera)
-                add_perm CAMERA
-                add_feat android.hardware.camera
-                ;;
-              microphone)
-                add_perm RECORD_AUDIO
-                add_perm MODIFY_AUDIO_SETTINGS
-                add_feat android.hardware.microphone
-                ;;
-              location)
-                add_perm ACCESS_FINE_LOCATION
-                add_perm ACCESS_COARSE_LOCATION
-                add_feat android.hardware.location
-                ;;
-              vibrate)
-                add_perm VIBRATE
-                ;;
-              fullscreen)
-                sed -i '/name="AppTheme.NoActionBar"/a <item name="android:windowFullscreen">true</item>' "$SRES/values/styles.xml"
-                ;;
-            esac
-          done
-
-          if [ "$FEAT" != "none" ]; then
-            echo "Ozellikler uygulandi: $FEAT"
-            grep -n "uses-permission\\|uses-feature" "$MAN" || true
-            grep -n "windowFullscreen" "$SRES/values/styles.xml" || true
-          fi
-
-          # Uygulama ikonu
           if [ "$HAS_ICON" = "true" ]; then
             sudo apt-get install -y imagemagick >/dev/null
             curl -sSf -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/icon/$JOB_ID" -o icon.png
-
             RES=android/app/src/main/res
             rm -rf "$RES/mipmap-anydpi-v26"
 
@@ -214,7 +309,6 @@ jobs:
         id: keys
         run: |
           curl -s -m 10 -X POST -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/progress/$JOB_ID?stage=keys" >/dev/null || true
-
           KS="$RUNNER_TEMP/upload.jks"
 
           if [ "$SIGN_MODE" = "own" ]; then
@@ -268,7 +362,6 @@ jobs:
         id: gradle
         run: |
           curl -s -m 10 -X POST -H "X-Secret: $WORKER_SECRET" "$WORKER_URL/progress/$JOB_ID?stage=gradle" >/dev/null || true
-
           cd android
           chmod +x gradlew
           ./gradlew bundleRelease assembleRelease
@@ -307,7 +400,6 @@ jobs:
 
           "$BT/apksigner" verify signed-release.apk
 
-      # APK ve AAB dosyalarini GitHub Actions Artifacts bolumune yukle
       - name: APK ve AAB dosyalarini GitHub'a yukle
         uses: actions/upload-artifact@v4
         with:
@@ -345,7 +437,6 @@ jobs:
           S_KEYS: ${{ steps.keys.outcome }}
           S_GRADLE: ${{ steps.gradle.outcome }}
           S_SIGN: ${{ steps.sign.outcome }}
-
         run: |
           MSG="Derleme beklenmedik bir sebeple basarisiz oldu."
           CODE="unknown"
@@ -361,7 +452,7 @@ jobs:
           fi
 
           if [ "$S_SET" = "failure" ]; then
-            MSG="Surum, yon, ikon, acilis rengi veya Android ozellikleri ayarlanamadi."
+            MSG="Surum, yon, ikon veya acilis rengi ayarlanamadi. Ikon gecerli bir PNG olmayabilir."
             CODE="settings"
           fi
 
